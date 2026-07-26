@@ -270,18 +270,15 @@ function SecurityCard() {
     mutationFn: async () => {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
-      // Confirmation trail: the account owner also gets an email they can act on
-      // if the change was not theirs.
-      if (profile?.email) {
-        const { error: mailError } = await supabase.auth.resetPasswordForEmail(profile.email, {
-          redirectTo: `${window.location.origin}/reset-password`,
-        });
-        if (mailError) throw mailError;
-      }
+      // We used to also send a confirmation email via
+      // supabase.auth.resetPasswordForEmail, but that trips the Supabase
+      // "email rate limit exceeded" error on frequent changes and surfaces to
+      // the user as a failure even though the password did update. The
+      // password change itself is the source of truth.
     },
     onSuccess: () => {
       setPassword("");
-      toast.success(t("profile.passwordChangedEmail"));
+      toast.success("Password changed successfully");
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
   });

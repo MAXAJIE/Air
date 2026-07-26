@@ -1,162 +1,647 @@
-diff --git a/src/hooks/use-idle-logout.tsx b/src/hooks/use-idle-logout.tsx
-index aabc8b6..b6d1e83 100644
---- a/src/hooks/use-idle-logout.tsx
-+++ b/src/hooks/use-idle-logout.tsx
-@@ -6,6 +6,7 @@ import { toast } from "sonner";
+--- a/src/routes/_authenticated/profile.tsx	2026-07-26 10:07:32.087480328 +0000
++++ b/src/routes/_authenticated/profile.tsx	2026-07-26 10:10:10.478554919 +0000
+@@ -270,18 +270,15 @@
+     mutationFn: async () => {
+       const { error } = await supabase.auth.updateUser({ password });
+       if (error) throw error;
+-      // Confirmation trail: the account owner also gets an email they can act on
+-      // if the change was not theirs.
+-      if (profile?.email) {
+-        const { error: mailError } = await supabase.auth.resetPasswordForEmail(profile.email, {
+-          redirectTo: `${window.location.origin}/reset-password`,
+-        });
+-        if (mailError) throw mailError;
+-      }
++      // We used to also send a confirmation email via
++      // supabase.auth.resetPasswordForEmail, but that trips the Supabase
++      // "email rate limit exceeded" error on frequent changes and surfaces to
++      // the user as a failure even though the password did update. The
++      // password change itself is the source of truth.
+     },
+     onSuccess: () => {
+       setPassword("");
+-      toast.success(t("profile.passwordChangedEmail"));
++      toast.success("Password changed successfully");
+     },
+     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+   });
+--- a/src/routes/_authenticated/jobs.tsx	2026-07-26 10:07:32.087127025 +0000
++++ b/src/routes/_authenticated/jobs.tsx	2026-07-26 10:08:23.826838838 +0000
+@@ -1,27 +1,325 @@
++import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { createFileRoute } from "@tanstack/react-router";
++import { CheckCircle2, ListChecks, Play, Send, Timer } from "lucide-react";
++import { useEffect, useState } from "react";
++import { toast } from "sonner";
+ 
+ import { EmptyState, PageHeader } from "@/components/app-shell";
++import { PhotoPicker } from "@/components/photo-picker";
++import { SignedPhoto } from "@/components/signed-photo";
++import { Button } from "@/components/ui/button";
++import { Checkbox } from "@/components/ui/checkbox";
++import { useAuthUser } from "@/hooks/use-app";
  import { useT } from "@/i18n";
- import {
-   INACTIVITY_TTL_MS,
++import { supabase } from "@/integrations/supabase/client";
++import {
++  holdIdleLogout,
 +  isIdleLogoutHeld,
-   isIdleExpired,
-   readLastActivity,
-   signOutForInactivity,
-@@ -29,6 +30,11 @@ export function useIdleLogout() {
++  releaseIdleLogout,
++} from "@/lib/session-hygiene";
++import { jobStatusChipClass } from "@/lib/status-colors";
  
-     const expire = async () => {
-       if (firing.current) return;
-+      // Never expire while a task hold is active (accepted, not submitted).
-+      if (isIdleLogoutHeld()) {
-+        schedule();
-+        return;
-+      }
-       firing.current = true;
-       await signOutForInactivity(queryClient);
-       toast.error(t("auth.idleLogout"));
-@@ -37,6 +43,11 @@ export function useIdleLogout() {
+ export const Route = createFileRoute("/_authenticated/jobs")({
+   head: () => ({
+     meta: [
+-      { title: "Keyward" },
+-      { name: "description", content: "Keyward property operations." },
+-      { property: "og:title", content: "Keyward" },
+-      { property: "og:description", content: "Keyward property operations." },
++      { title: "Jobs — Keyward" },
++      { name: "description", content: "Your assigned jobs and tasks." },
++      { property: "og:title", content: "Jobs — Keyward" },
++      { property: "og:description", content: "Your assigned jobs and tasks." },
+       { name: "robots", content: "noindex" },
+     ],
+   }),
+-  component: Page,
++  component: JobsPage,
+ });
  
-     const schedule = () => {
-       if (timer) window.clearTimeout(timer);
-+      if (isIdleLogoutHeld()) {
-+        // Re-check every 30s while paused; picks up release() promptly.
-+        timer = window.setTimeout(schedule, 30_000);
-+        return;
-+      }
-       const last = readLastActivity() ?? Date.now();
-       const remaining = last + INACTIVITY_TTL_MS - Date.now();
-       if (remaining <= 0) {
-diff --git a/src/lib/session-hygiene.ts b/src/lib/session-hygiene.ts
-index a7a1dea..aefc036 100644
---- a/src/lib/session-hygiene.ts
-+++ b/src/lib/session-hygiene.ts
-@@ -10,6 +10,13 @@ import { supabase } from "@/integrations/supabase/client";
- export const INACTIVITY_TTL_MS = 15 * 60 * 1000;
- export const PENDING_VERIFY_KEY = "keyward.pendingVerify";
- export const LAST_ACTIVE_KEY = "keyward.lastActive";
-+/**
-+ * Counter of in-progress tasks that should keep the session alive.
-+ * While > 0, `isIdleExpired` returns false and the idle logout is paused.
-+ * Incremented by `holdIdleLogout` (e.g. on Accept), decremented by
-+ * `releaseIdleLogout` (e.g. on Submit / Cancel).
-+ */
-+export const TASK_HOLD_KEY = "keyward.taskHold";
+-function Page() {
++type Task = {
++  id: string;
++  title: string;
++  description: string | null;
++  status: "pending" | "in_progress" | "submitted" | "done";
++  due_at: string | null;
++  cleaning_job_id: string | null;
++  proof_photo_path: string | null;
++  source: string | null;
++};
++
++function useCountdown(dueAt: string | null) {
++  const [now, setNow] = useState(Date.now());
++  useEffect(() => {
++    if (!dueAt) return;
++    const id = window.setInterval(() => setNow(Date.now()), 1000);
++    return () => window.clearInterval(id);
++  }, [dueAt]);
++  if (!dueAt) return null;
++  const ms = new Date(dueAt).getTime() - now;
++  const overdue = ms < 0;
++  const abs = Math.abs(ms);
++  const mins = Math.floor(abs / 60000);
++  const secs = Math.floor((abs % 60000) / 1000);
++  return { overdue, label: `${mins}:${secs.toString().padStart(2, "0")}` };
++}
++
++function JobsPage() {
+   const t = useT();
++  const { data: user } = useAuthUser();
++  const qc = useQueryClient();
++
++  const tasksQ = useQuery({
++    queryKey: ["my-jobs", user?.id],
++    enabled: !!user?.id,
++    queryFn: async () => {
++      const { data, error } = await supabase
++        .from("tasks")
++        .select(
++          "id, title, description, status, due_at, cleaning_job_id, proof_photo_path, source",
++        )
++        .eq("assigned_to_user_id", user!.id)
++        .neq("status", "done")
++        .order("due_at", { ascending: true, nullsFirst: false });
++      if (error) throw error;
++      return data as Task[];
++    },
++    refetchInterval: 30_000,
++  });
++
++  const accept = useMutation({
++    mutationFn: async (id: string) => {
++      const { error } = await supabase
++        .from("tasks")
++        .update({ status: "in_progress" })
++        .eq("id", id);
++      if (error) throw error;
++    },
++    onSuccess: () => {
++      // Hold the 15-min idle logout while the user is actively working on a task.
++      holdIdleLogout();
++      qc.invalidateQueries({ queryKey: ["my-jobs", user?.id] });
++    },
++    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
++  });
++
++  const submit = useMutation({
++    mutationFn: async (id: string) => {
++      const { error } = await supabase
++        .from("tasks")
++        .update({ status: "submitted" })
++        .eq("id", id);
++      if (error) throw error;
++    },
++    onSuccess: () => {
++      // Release the hold: the 15-minute inactivity clock resumes.
++      releaseIdleLogout();
++      qc.invalidateQueries({ queryKey: ["my-jobs", user?.id] });
++      toast.success(t("common.saved"));
++    },
++    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
++  });
++
++  // If the user reloads with an in-progress task and no hold, re-acquire it.
++  useEffect(() => {
++    const anyInProgress = (tasksQ.data ?? []).some((task) => task.status === "in_progress");
++    if (anyInProgress && !isIdleLogoutHeld()) holdIdleLogout();
++  }, [tasksQ.data]);
++
++  const rows = tasksQ.data ?? [];
++
+   return (
+     <>
+       <PageHeader title={t("nav.jobs")} />
+-      <EmptyState />
++      {rows.length === 0 ? (
++        <EmptyState />
++      ) : (
++        <section className="grid gap-3">
++          {rows.map((task) => (
++            <TaskCard
++              key={task.id}
++              task={task}
++              onAccept={() => accept.mutate(task.id)}
++              onSubmit={() => submit.mutate(task.id)}
++            />
++          ))}
++        </section>
++      )}
+     </>
+   );
+ }
++
++function TaskCard({
++  task,
++  onAccept,
++  onSubmit,
++}: {
++  task: Task;
++  onAccept: () => void;
++  onSubmit: () => void;
++}) {
++  const t = useT();
++  const countdown = useCountdown(task.due_at);
++  const [proof, setProof] = useState<string | null>(task.proof_photo_path);
++  const [saveProof, setSaveProof] = useState(false);
++
++  const savePhoto = async (path: string | null) => {
++    setProof(path);
++    setSaveProof(true);
++    const { error } = await supabase
++      .from("tasks")
++      .update({ proof_photo_path: path })
++      .eq("id", task.id);
++    setSaveProof(false);
++    if (error) toast.error(error.message);
++  };
++
++  return (
++    <article className="surface space-y-3 p-4">
++      <header className="flex flex-wrap items-center gap-2">
++        <h3 className="min-w-0 flex-1 truncate text-base font-medium">{task.title}</h3>
++        <span className={jobStatusChipClass(task.status)}>
++          {task.status === "in_progress"
++            ? t("task.inProgress")
++            : task.status === "submitted"
++              ? t("task.submitted")
++              : t("task.pending")}
++        </span>
++        {countdown && (
++          <span
++            className={`inline-flex items-center gap-1 text-xs ${
++              countdown.overdue ? "font-medium text-destructive" : "text-muted-foreground"
++            }`}
++          >
++            <Timer className="h-3.5 w-3.5" aria-hidden="true" />
++            {countdown.overdue ? `-${countdown.label}` : countdown.label}
++          </span>
++        )}
++      </header>
++      {task.description && (
++        <p className="text-sm text-muted-foreground">{task.description}</p>
++      )}
++
++      {task.cleaning_job_id && (
++        <ChecklistPanel jobId={task.cleaning_job_id} readOnly={task.status !== "in_progress"} />
++      )}
++
++      {task.status !== "pending" && (
++        <div className="space-y-2">
++          <p className="flex items-center gap-2 text-xs text-muted-foreground">
++            <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
++            {t("task.proof")}
++          </p>
++          {task.status === "in_progress" ? (
++            <PhotoPicker
++              value={proof}
++              onChange={savePhoto}
++              folder="task-proof"
++              label={t("task.proof")}
++            />
++          ) : proof ? (
++            <SignedPhoto path={proof} alt={t("task.proof")} className="h-32 w-full rounded-md object-cover" />
++          ) : (
++            <p className="text-xs text-muted-foreground">{t("task.noProof")}</p>
++          )}
++        </div>
++      )}
++
++      <footer className="flex flex-wrap justify-end gap-2">
++        {task.status === "pending" && (
++          <Button size="sm" onClick={onAccept}>
++            <Play className="h-4 w-4" aria-hidden="true" />
++            {t("task.accept") || "Accept"}
++          </Button>
++        )}
++        {task.status === "in_progress" && (
++          <Button size="sm" disabled={saveProof} onClick={onSubmit}>
++            <Send className="h-4 w-4" aria-hidden="true" />
++            {t("task.submit") || "Submit"}
++          </Button>
++        )}
++        {task.status === "submitted" && (
++          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
++            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
++            {t("task.submitted")}
++          </span>
++        )}
++      </footer>
++    </article>
++  );
++}
++
++function ChecklistPanel({ jobId, readOnly }: { jobId: string; readOnly: boolean }) {
++  const t = useT();
++  const qc = useQueryClient();
++  const itemsQ = useQuery({
++    queryKey: ["job-items", jobId],
++    queryFn: async () => {
++      const { data, error } = await supabase
++        .from("cleaning_job_items")
++        .select("id, description, is_checked, photo_url, sort_order")
++        .eq("cleaning_job_id", jobId)
++        .order("sort_order");
++      if (error) throw error;
++      return data;
++    },
++  });
++
++  const toggle = useMutation({
++    mutationFn: async (item: { id: string; is_checked: boolean }) => {
++      const { error } = await supabase
++        .from("cleaning_job_items")
++        .update({ is_checked: item.is_checked })
++        .eq("id", item.id);
++      if (error) throw error;
++    },
++    onSuccess: () => qc.invalidateQueries({ queryKey: ["job-items", jobId] }),
++    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
++  });
++
++  const setPhoto = useMutation({
++    mutationFn: async (item: { id: string; photo_url: string | null }) => {
++      const { error } = await supabase
++        .from("cleaning_job_items")
++        .update({ photo_url: item.photo_url })
++        .eq("id", item.id);
++      if (error) throw error;
++    },
++    onSuccess: () => qc.invalidateQueries({ queryKey: ["job-items", jobId] }),
++    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
++  });
++
++  const items = itemsQ.data ?? [];
++  if (items.length === 0) return null;
++
++  return (
++    <ul className="space-y-2">
++      {items.map((item) => (
++        <li key={item.id} className="rounded-md border border-border p-3 text-sm">
++          <label className="flex items-start gap-2">
++            <Checkbox
++              checked={item.is_checked}
++              disabled={readOnly}
++              onCheckedChange={(v) =>
++                toggle.mutate({ id: item.id, is_checked: v === true })
++              }
++            />
++            <span className="min-w-0 flex-1">{item.description}</span>
++          </label>
++          {!readOnly && (
++            <div className="mt-2">
++              <PhotoPicker
++                value={item.photo_url}
++                onChange={(path) => setPhoto.mutate({ id: item.id, photo_url: path })}
++                folder="job-item"
++                label={t("task.proof")}
++              />
++            </div>
++          )}
++          {readOnly && item.photo_url && (
++            <SignedPhoto
++              path={item.photo_url}
++              alt={item.description}
++              className="mt-2 h-24 w-full rounded-md object-cover"
++            />
++          )}
++        </li>
++      ))}
++    </ul>
++  );
++}
+--- a/src/routes/_authenticated/tasks.tsx	2026-07-26 10:07:32.088035928 +0000
++++ b/src/routes/_authenticated/tasks.tsx	2026-07-26 10:10:10.537469849 +0000
+@@ -80,6 +80,20 @@
  
- export type PendingVerify = { email: string; at: number };
+   const peopleQ = useGroupMembers(groupId);
  
-@@ -36,11 +43,56 @@ export function clearActivity() {
- 
- /** True once the last recorded interaction is older than the idle window. */
- export function isIdleExpired(now: number = Date.now()): boolean {
-+  // While the user has at least one accepted, not-yet-submitted task, we
-+  // deliberately pause the idle logout. The 15-minute clock only counts
-+  // again once every hold has been released.
-+  if (readTaskHold() > 0) return false;
-   const last = readLastActivity();
-   if (last === null) return false;
-   return now - last > INACTIVITY_TTL_MS;
++  const templatesQ = useQuery({
++    queryKey: ["templates", groupId],
++    enabled: !!groupId,
++    queryFn: async () => {
++      const { data, error } = await supabase
++        .from("cleaning_templates")
++        .select("id, name")
++        .eq("owner_group_id", groupId!)
++        .order("name");
++      if (error) throw error;
++      return data ?? [];
++    },
++  });
++
+   const propsQ = useQuery({
+     queryKey: ["properties", groupId],
+     enabled: !!groupId,
+@@ -203,7 +217,7 @@
+                 {t("task.reopen")}
+               </Button>
+             )}
+-            {isOwner && task.source !== "cleaning" && (
++            {isOwner && (
+               <Button
+                 size="sm"
+                 variant="ghost"
+@@ -226,8 +240,13 @@
+         <CreateTaskDialog
+           groupId={groupId}
+           createdBy={profile.user_id}
+-          people={(peopleQ.data ?? []).map((p) => ({ userId: p.user_id, name: p.name }))}
++          people={(peopleQ.data ?? []).map((p) => ({
++            userId: p.user_id,
++            name: p.name,
++            roles: p.roles,
++          }))}
+           properties={propsQ.data ?? []}
++          templates={templatesQ.data ?? []}
+           onClose={() => setCreating(false)}
+         />
+       )}
+@@ -243,30 +262,115 @@
+   );
  }
  
-+function readTaskHold(): number {
-+  if (typeof window === "undefined") return 0;
-+  const raw = window.localStorage.getItem(TASK_HOLD_KEY);
-+  const parsed = raw ? Number(raw) : 0;
-+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-+}
++type CreatePerson = { userId: string; name: string; roles: string[] };
++type CreateTemplate = { id: string; name: string };
 +
-+function writeTaskHold(value: number) {
-+  if (typeof window === "undefined") return;
-+  const clamped = Math.max(0, Math.floor(value));
-+  if (clamped === 0) {
-+    window.localStorage.removeItem(TASK_HOLD_KEY);
-+  } else {
-+    window.localStorage.setItem(TASK_HOLD_KEY, String(clamped));
-+  }
-+}
++const DURATION_OPTIONS = Array.from({ length: 24 }, (_, i) => (i + 1) * 5); // 5..120 min
 +
-+/** Pause the idle logout while a task is being worked on. Call on Accept. */
-+export function holdIdleLogout() {
-+  writeTaskHold(readTaskHold() + 1);
-+  // Reset the activity clock so that when the hold is released the user
-+  // still has a full window before being logged out.
-+  touchActivity();
-+}
+ function CreateTaskDialog({
+   groupId,
+   createdBy,
+   people,
+   properties,
++  templates,
+   onClose,
+ }: {
+   groupId: string;
+   createdBy: string;
+-  people: Array<{ userId: string; name: string }>;
++  people: CreatePerson[];
+   properties: Array<{ id: string; name: string }>;
++  templates: CreateTemplate[];
+   onClose: () => void;
+ }) {
+   const t = useT();
+   const qc = useQueryClient();
++  const [jobType, setJobType] = useState<"normal" | "cleaning">("normal");
+   const [title, setTitle] = useState("");
+   const [description, setDescription] = useState("");
+   const [assignee, setAssignee] = useState<string>("");
+   const [propertyId, setPropertyId] = useState<string>("none");
+   const [dueAt, setDueAt] = useState("");
++  const [durationMin, setDurationMin] = useState<string>("");
++  const [templateId, setTemplateId] = useState<string>("");
++  const [scheduledAt, setScheduledAt] = useState<string>("");
+   const [isPrivate, setIsPrivate] = useState(false);
+ 
++  // Normal tasks: worker-role assignees only. Cleaning: cleaner-role only.
++  const allowedRoles = jobType === "cleaning" ? ["cleaner"] : ["worker"];
++  const eligiblePeople = people.filter((p) =>
++    p.roles.some((r) => allowedRoles.includes(r)),
++  );
 +
-+/** Release one pause. Call on Submit / Cancel. Safe to call idempotently. */
-+export function releaseIdleLogout() {
-+  writeTaskHold(readTaskHold() - 1);
-+  touchActivity();
-+}
++  // Reset assignee when jobType flips so the picker never carries a hidden id.
++  const onJobTypeChange = (next: "normal" | "cleaning") => {
++    setJobType(next);
++    setAssignee("");
++  };
 +
-+/** True while at least one hold is active. */
-+export function isIdleLogoutHeld(): boolean {
-+  return readTaskHold() > 0;
-+}
++  // "When do you want the job done?" — quick-pick maps to due_at from now.
++  const resolvedDueAt = () => {
++    if (durationMin) return new Date(Date.now() + Number(durationMin) * 60_000).toISOString();
++    return dueAt ? new Date(dueAt).toISOString() : null;
++  };
 +
-+/** Clear every hold. Call on hard sign-out so the next session starts clean. */
-+export function clearIdleLogoutHolds() {
-+  writeTaskHold(0);
-+}
-+
- /** Sign out for inactivity: keeps the account, drops only the local session + caches. */
- export async function signOutForInactivity(queryClient?: QueryClient) {
-   clearActivity();
-diff --git a/src/routes/auth.tsx b/src/routes/auth.tsx
-index 9ab647f..87a82fa 100644
---- a/src/routes/auth.tsx
-+++ b/src/routes/auth.tsx
-@@ -68,9 +68,14 @@ function AuthPage() {
-     try {
-       let loginEmail = identifier.trim();
-       if (!loginEmail.includes("@")) {
--        const { data } = await supabase.from("profiles").select("email").eq("username", loginEmail).maybeSingle();
--        if (!data?.email) throw new Error(t("common.error"));
--        loginEmail = data.email;
-+        // profiles is not readable by anon; use a SECURITY DEFINER RPC that
-+        // returns ONLY the email for the given username.
-+        const { data: resolved, error: rpcError } = await supabase.rpc("email_for_username", {
-+          p_username: loginEmail,
+   const create = useMutation({
+     mutationFn: async () => {
++      if (jobType === "cleaning") {
++        // Materialise a cleaning job + its checklist items so cleaners see the
++        // template's steps in "My jobs". A companion task row (source=cleaning)
++        // is created below so both surfaces show the same amount.
++        if (!templateId) throw new Error("Pick a cleaning template");
++        const propertyIdVal = propertyId === "none" ? null : propertyId;
++        const { data: template, error: tErr } = await supabase
++          .from("cleaning_templates")
++          .select("id, name, cleaning_template_items ( description, sort_order )")
++          .eq("id", templateId)
++          .single();
++        if (tErr) throw tErr;
++        const scheduled = scheduledAt ? new Date(scheduledAt).toISOString() : new Date().toISOString();
++        const { data: job, error: jErr } = await supabase
++          .from("cleaning_jobs")
++          .insert({
++            owner_group_id: groupId,
++            property_id: propertyIdVal,
++            template_id: templateId,
++            scheduled_at: scheduled,
++            assigned_to_user_id: assignee || null,
++            status: "pending",
++          })
++          .select("id")
++          .single();
++        if (jErr) throw jErr;
++        const items = (template?.cleaning_template_items ?? []) as Array<{
++          description: string;
++          sort_order: number;
++        }>;
++        if (items.length > 0) {
++          const { error: iErr } = await supabase.from("cleaning_job_items").insert(
++            items.map((it) => ({
++              cleaning_job_id: job!.id,
++              description: it.description,
++              sort_order: it.sort_order,
++              is_checked: false,
++            })),
++          );
++          if (iErr) throw iErr;
++        }
++        const { error } = await supabase.from("tasks").insert({
++          owner_group_id: groupId,
++          created_by_user_id: createdBy,
++          assigned_to_user_id: assignee || null,
++          property_id: propertyIdVal,
++          title: (title.trim() || template?.name) ?? "Cleaning",
++          description: description.trim() || null,
++          due_at: resolvedDueAt(),
++          is_private: false,
++          source: "cleaning",
++          cleaning_job_id: job!.id,
 +        });
-+        if (rpcError) throw rpcError;
-+        if (!resolved) throw new Error(t("common.error"));
-+        loginEmail = String(resolved);
-       }
-       const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
-       if (error) throw error;
-diff --git a/supabase/migrations/20260727000000_auth_username_and_task_hold.sql b/supabase/migrations/20260727000000_auth_username_and_task_hold.sql
-new file mode 100644
---- /dev/null
-+++ b/supabase/migrations/20260727000000_auth_username_and_task_hold.sql
-@@ -0,0 +1,24 @@
-+-- Patch 1: allow anon to resolve a username -> email for sign-in, safely.
-+-- The profiles table is not readable by anon (by design). Sign-in with a
-+-- username requires exactly one lookup: username -> email. Expose it through
-+-- a SECURITY DEFINER function that returns only the email, so no other
-+-- profile column leaks.
-+
-+create or replace function public.email_for_username(p_username text)
-+returns text
-+language sql
-+stable
-+security definer
-+set search_path = public
-+as $$
-+  select email
-+  from public.profiles
-+  where lower(username) = lower(p_username)
-+  limit 1
-+$$;
-+
-+revoke all on function public.email_for_username(text) from public;
-+grant execute on function public.email_for_username(text) to anon, authenticated;
-+
-+comment on function public.email_for_username(text) is
-+  'Resolves a username to its email for sign-in. Returns null when not found. Anon can call it.';
++        if (error) throw error;
++        return;
++      }
+       const { error } = await supabase.from("tasks").insert({
+         owner_group_id: groupId,
+         created_by_user_id: createdBy,
+@@ -274,7 +378,7 @@
+         property_id: propertyId === "none" ? null : propertyId,
+         title: title.trim(),
+         description: description.trim() || null,
+-        due_at: dueAt ? new Date(dueAt).toISOString() : null,
++        due_at: resolvedDueAt(),
+         is_private: isPrivate,
+         source: "manual",
+       });
+@@ -296,6 +400,18 @@
+         </DialogHeader>
+         <div className="space-y-4">
+           <div className="space-y-2">
++            <Label>Job type</Label>
++            <Select value={jobType} onValueChange={(v) => onJobTypeChange(v as "normal" | "cleaning")}>
++              <SelectTrigger>
++                <SelectValue />
++              </SelectTrigger>
++              <SelectContent>
++                <SelectItem value="normal">Normal task</SelectItem>
++                <SelectItem value="cleaning">Cleaning task</SelectItem>
++              </SelectContent>
++            </Select>
++          </div>
++          <div className="space-y-2">
+             <Label htmlFor="task-title">{t("common.name")}</Label>
+             <Input id="task-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+           </div>
+@@ -315,7 +431,12 @@
+                 <SelectValue placeholder={t("task.pickAssignee")} />
+               </SelectTrigger>
+               <SelectContent>
+-                {people.map((p) => (
++                {eligiblePeople.length === 0 && (
++                  <SelectItem value="__none" disabled>
++                    {jobType === "cleaning" ? "No cleaners in this group" : "No workers in this group"}
++                  </SelectItem>
++                )}
++                {eligiblePeople.map((p) => (
+                   <SelectItem key={p.userId} value={p.userId}>
+                     {p.name}
+                   </SelectItem>
+@@ -339,6 +460,58 @@
+               </SelectContent>
+             </Select>
+           </div>
++          {jobType === "cleaning" && (
++            <>
++              <div className="space-y-2">
++                <Label>Checklist template</Label>
++                <Select value={templateId} onValueChange={setTemplateId}>
++                  <SelectTrigger>
++                    <SelectValue placeholder="Pick a template" />
++                  </SelectTrigger>
++                  <SelectContent>
++                    {templates.length === 0 && (
++                      <SelectItem value="__none" disabled>
++                        No cleaning templates yet
++                      </SelectItem>
++                    )}
++                    {templates.map((tpl) => (
++                      <SelectItem key={tpl.id} value={tpl.id}>
++                        {tpl.name}
++                      </SelectItem>
++                    ))}
++                  </SelectContent>
++                </Select>
++              </div>
++              <div className="space-y-2">
++                <Label htmlFor="task-scheduled">When to execute</Label>
++                <Input
++                  id="task-scheduled"
++                  type="datetime-local"
++                  value={scheduledAt}
++                  onChange={(e) => setScheduledAt(e.target.value)}
++                />
++              </div>
++            </>
++          )}
++          <div className="space-y-2">
++            <Label>When do you want the job done?</Label>
++            <Select value={durationMin} onValueChange={setDurationMin}>
++              <SelectTrigger>
++                <SelectValue placeholder="Pick a duration" />
++              </SelectTrigger>
++              <SelectContent>
++                <SelectItem value="">Custom / no deadline</SelectItem>
++                {DURATION_OPTIONS.map((min) => (
++                  <SelectItem key={min} value={String(min)}>
++                    {min} min
++                  </SelectItem>
++                ))}
++              </SelectContent>
++            </Select>
++            <p className="text-xs text-muted-foreground">
++              Sets a countdown from now. Overrides the manual due date below.
++            </p>
++          </div>
+           <div className="space-y-2">
+             <Label htmlFor="task-due">{t("task.due")}</Label>
+             <Input
+@@ -346,12 +519,15 @@
+               type="datetime-local"
+               value={dueAt}
+               onChange={(e) => setDueAt(e.target.value)}
++              disabled={!!durationMin}
+             />
+           </div>
+-          <label className="flex items-center gap-2 text-sm">
+-            <Checkbox checked={isPrivate} onCheckedChange={(v) => setIsPrivate(v === true)} />
+-            {t("task.private")}
+-          </label>
++          {jobType === "normal" && (
++            <label className="flex items-center gap-2 text-sm">
++              <Checkbox checked={isPrivate} onCheckedChange={(v) => setIsPrivate(v === true)} />
++              {t("task.private")}
++            </label>
++          )}
+         </div>
+         <DialogFooter>
+           <Button variant="outline" onClick={onClose}>

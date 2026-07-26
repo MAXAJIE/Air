@@ -80,6 +80,20 @@ function TasksPage() {
 
   const peopleQ = useGroupMembers(groupId);
 
+  const templatesQ = useQuery({
+    queryKey: ["templates", groupId],
+    enabled: !!groupId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cleaning_templates")
+        .select("id, name")
+        .eq("owner_group_id", groupId!)
+        .order("name");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
   const propsQ = useQuery({
     queryKey: ["properties", groupId],
     enabled: !!groupId,
@@ -203,7 +217,7 @@ function TasksPage() {
                 {t("task.reopen")}
               </Button>
             )}
-            {isOwner && task.source !== "cleaning" && (
+            {isOwner && (
               <Button
                 size="sm"
                 variant="ghost"
@@ -226,8 +240,13 @@ function TasksPage() {
         <CreateTaskDialog
           groupId={groupId}
           createdBy={profile.user_id}
-          people={(peopleQ.data ?? []).map((p) => ({ userId: p.user_id, name: p.name }))}
+          people={(peopleQ.data ?? []).map((p) => ({
+            userId: p.user_id,
+            name: p.name,
+            roles: p.roles,
+          }))}
           properties={propsQ.data ?? []}
+          templates={templatesQ.data ?? []}
           onClose={() => setCreating(false)}
         />
       )}
@@ -243,30 +262,115 @@ function TasksPage() {
   );
 }
 
+type CreatePerson = { userId: string; name: string; roles: string[] };
+type CreateTemplate = { id: string; name: string };
+
+const DURATION_OPTIONS = Array.from({ length: 24 }, (_, i) => (i + 1) * 5); // 5..120 min
+
 function CreateTaskDialog({
   groupId,
   createdBy,
   people,
   properties,
+  templates,
   onClose,
 }: {
   groupId: string;
   createdBy: string;
-  people: Array<{ userId: string; name: string }>;
+  people: CreatePerson[];
   properties: Array<{ id: string; name: string }>;
+  templates: CreateTemplate[];
   onClose: () => void;
 }) {
   const t = useT();
   const qc = useQueryClient();
+  const [jobType, setJobType] = useState<"normal" | "cleaning">("normal");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [assignee, setAssignee] = useState<string>("");
   const [propertyId, setPropertyId] = useState<string>("none");
   const [dueAt, setDueAt] = useState("");
+  const [durationMin, setDurationMin] = useState<string>("");
+  const [templateId, setTemplateId] = useState<string>("");
+  const [scheduledAt, setScheduledAt] = useState<string>("");
   const [isPrivate, setIsPrivate] = useState(false);
+
+  // Normal tasks: worker-role assignees only. Cleaning: cleaner-role only.
+  const allowedRoles = jobType === "cleaning" ? ["cleaner"] : ["worker"];
+  const eligiblePeople = people.filter((p) =>
+    p.roles.some((r) => allowedRoles.includes(r)),
+  );
+
+  // Reset assignee when jobType flips so the picker never carries a hidden id.
+  const onJobTypeChange = (next: "normal" | "cleaning") => {
+    setJobType(next);
+    setAssignee("");
+  };
+
+  // "When do you want the job done?" — quick-pick maps to due_at from now.
+  const resolvedDueAt = () => {
+    if (durationMin) return new Date(Date.now() + Number(durationMin) * 60_000).toISOString();
+    return dueAt ? new Date(dueAt).toISOString() : null;
+  };
 
   const create = useMutation({
     mutationFn: async () => {
+      if (jobType === "cleaning") {
+        // Materialise a cleaning job + its checklist items so cleaners see the
+        // template's steps in "My jobs". A companion task row (source=cleaning)
+        // is created below so both surfaces show the same amount.
+        if (!templateId) throw new Error("Pick a cleaning template");
+        const propertyIdVal = propertyId === "none" ? null : propertyId;
+        const { data: template, error: tErr } = await supabase
+          .from("cleaning_templates")
+          .select("id, name, cleaning_template_items ( description, sort_order )")
+          .eq("id", templateId)
+          .single();
+        if (tErr) throw tErr;
+        const scheduled = scheduledAt ? new Date(scheduledAt).toISOString() : new Date().toISOString();
+        const { data: job, error: jErr } = await supabase
+          .from("cleaning_jobs")
+          .insert({
+            owner_group_id: groupId,
+            property_id: propertyIdVal,
+            template_id: templateId,
+            scheduled_at: scheduled,
+            assigned_to_user_id: assignee || null,
+            status: "pending",
+          })
+          .select("id")
+          .single();
+        if (jErr) throw jErr;
+        const items = (template?.cleaning_template_items ?? []) as Array<{
+          description: string;
+          sort_order: number;
+        }>;
+        if (items.length > 0) {
+          const { error: iErr } = await supabase.from("cleaning_job_items").insert(
+            items.map((it) => ({
+              cleaning_job_id: job!.id,
+              description: it.description,
+              sort_order: it.sort_order,
+              is_checked: false,
+            })),
+          );
+          if (iErr) throw iErr;
+        }
+        const { error } = await supabase.from("tasks").insert({
+          owner_group_id: groupId,
+          created_by_user_id: createdBy,
+          assigned_to_user_id: assignee || null,
+          property_id: propertyIdVal,
+          title: (title.trim() || template?.name) ?? "Cleaning",
+          description: description.trim() || null,
+          due_at: resolvedDueAt(),
+          is_private: false,
+          source: "cleaning",
+          cleaning_job_id: job!.id,
+        });
+        if (error) throw error;
+        return;
+      }
       const { error } = await supabase.from("tasks").insert({
         owner_group_id: groupId,
         created_by_user_id: createdBy,
@@ -274,7 +378,7 @@ function CreateTaskDialog({
         property_id: propertyId === "none" ? null : propertyId,
         title: title.trim(),
         description: description.trim() || null,
-        due_at: dueAt ? new Date(dueAt).toISOString() : null,
+        due_at: resolvedDueAt(),
         is_private: isPrivate,
         source: "manual",
       });
@@ -296,6 +400,18 @@ function CreateTaskDialog({
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
+            <Label>Job type</Label>
+            <Select value={jobType} onValueChange={(v) => onJobTypeChange(v as "normal" | "cleaning")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="normal">Normal task</SelectItem>
+                <SelectItem value="cleaning">Cleaning task</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="task-title">{t("common.name")}</Label>
             <Input id="task-title" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
@@ -315,7 +431,12 @@ function CreateTaskDialog({
                 <SelectValue placeholder={t("task.pickAssignee")} />
               </SelectTrigger>
               <SelectContent>
-                {people.map((p) => (
+                {eligiblePeople.length === 0 && (
+                  <SelectItem value="__none" disabled>
+                    {jobType === "cleaning" ? "No cleaners in this group" : "No workers in this group"}
+                  </SelectItem>
+                )}
+                {eligiblePeople.map((p) => (
                   <SelectItem key={p.userId} value={p.userId}>
                     {p.name}
                   </SelectItem>
@@ -339,6 +460,58 @@ function CreateTaskDialog({
               </SelectContent>
             </Select>
           </div>
+          {jobType === "cleaning" && (
+            <>
+              <div className="space-y-2">
+                <Label>Checklist template</Label>
+                <Select value={templateId} onValueChange={setTemplateId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pick a template" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.length === 0 && (
+                      <SelectItem value="__none" disabled>
+                        No cleaning templates yet
+                      </SelectItem>
+                    )}
+                    {templates.map((tpl) => (
+                      <SelectItem key={tpl.id} value={tpl.id}>
+                        {tpl.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="task-scheduled">When to execute</Label>
+                <Input
+                  id="task-scheduled"
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={(e) => setScheduledAt(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+          <div className="space-y-2">
+            <Label>When do you want the job done?</Label>
+            <Select value={durationMin} onValueChange={setDurationMin}>
+              <SelectTrigger>
+                <SelectValue placeholder="Pick a duration" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">Custom / no deadline</SelectItem>
+                {DURATION_OPTIONS.map((min) => (
+                  <SelectItem key={min} value={String(min)}>
+                    {min} min
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Sets a countdown from now. Overrides the manual due date below.
+            </p>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="task-due">{t("task.due")}</Label>
             <Input
@@ -346,12 +519,15 @@ function CreateTaskDialog({
               type="datetime-local"
               value={dueAt}
               onChange={(e) => setDueAt(e.target.value)}
+              disabled={!!durationMin}
             />
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={isPrivate} onCheckedChange={(v) => setIsPrivate(v === true)} />
-            {t("task.private")}
-          </label>
+          {jobType === "normal" && (
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox checked={isPrivate} onCheckedChange={(v) => setIsPrivate(v === true)} />
+              {t("task.private")}
+            </label>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
