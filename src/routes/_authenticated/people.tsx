@@ -523,3 +523,14 @@ function RoleColumn({
     </section>
   );
 }
+
+// Owner-only: remove a cleaning company from the group. UI callers wire this
+// to the same "Remove" affordance used for workers/cleaners.
+async function kickHrCompany(groupId: string, hrUserId: string) {
+    const { error } = await supabase.rpc("kick_hr_company", {
+        p_group_id: groupId,
+        p_hr_user_id: hrUserId,
+    });
+    if (error) throw error;
+}
+export { kickHrCompany };

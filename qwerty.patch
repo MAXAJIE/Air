@@ -1,647 +1,212 @@
---- a/src/routes/_authenticated/profile.tsx	2026-07-26 10:07:32.087480328 +0000
-+++ b/src/routes/_authenticated/profile.tsx	2026-07-26 10:10:10.478554919 +0000
-@@ -270,18 +270,15 @@
-     mutationFn: async () => {
-       const { error } = await supabase.auth.updateUser({ password });
-       if (error) throw error;
--      // Confirmation trail: the account owner also gets an email they can act on
--      // if the change was not theirs.
--      if (profile?.email) {
--        const { error: mailError } = await supabase.auth.resetPasswordForEmail(profile.email, {
--          redirectTo: `${window.location.origin}/reset-password`,
--        });
--        if (mailError) throw mailError;
--      }
-+      // We used to also send a confirmation email via
-+      // supabase.auth.resetPasswordForEmail, but that trips the Supabase
-+      // "email rate limit exceeded" error on frequent changes and surfaces to
-+      // the user as a failure even though the password did update. The
-+      // password change itself is the source of truth.
-     },
-     onSuccess: () => {
-       setPassword("");
--      toast.success(t("profile.passwordChangedEmail"));
-+      toast.success("Password changed successfully");
-     },
-     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
-   });
---- a/src/routes/_authenticated/jobs.tsx	2026-07-26 10:07:32.087127025 +0000
-+++ b/src/routes/_authenticated/jobs.tsx	2026-07-26 10:08:23.826838838 +0000
-@@ -1,27 +1,325 @@
-+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
- import { createFileRoute } from "@tanstack/react-router";
-+import { CheckCircle2, ListChecks, Play, Send, Timer } from "lucide-react";
-+import { useEffect, useState } from "react";
-+import { toast } from "sonner";
+--- /dev/null
++++ b/supabase/migrations/20260728000000_air_v3_invites_and_kick.sql
+@@ -0,0 +1,89 @@
++-- Air v3: single-use invites, no HR pilot cap, and richer property-status CRUD hooks.
++--
++-- Behaviour changes:
++--  * redeem_invite_code / redeem_hr_invite_code now revoke the code after a
++--    successful redemption (single-use). The People page filters codes by
++--    revoked_at IS NULL, so used codes disappear on their own — no extra UI.
++--  * The "pilot" cap that blocked a cleaning company from joining a second
++--    owner (or re-joining after leaving) is removed; joining an owner group is
++--    now genuinely optional.
++--  * kick_hr_company lets the owner remove a cleaning company from their
++--    group the same way workers/cleaners are removed.
++
++CREATE OR REPLACE FUNCTION public.redeem_invite_code(p_code text)
++RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
++DECLARE
++  v_uid uuid := auth.uid();
++  v_role public.app_role;
++  v_invite public.invite_codes%ROWTYPE;
++  v_count int;
++BEGIN
++  IF v_uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
++  SELECT primary_role INTO v_role FROM public.profiles WHERE user_id = v_uid;
++  IF v_role IS NULL THEN RAISE EXCEPTION 'Pick your role first'; END IF;
++
++  SELECT * INTO v_invite FROM public.invite_codes
++   WHERE upper(code) = upper(trim(p_code)) AND active = true AND revoked_at IS NULL
++   FOR UPDATE;
++  IF v_invite.id IS NULL THEN RAISE EXCEPTION 'Invalid or revoked invite code'; END IF;
++  IF v_invite.role <> v_role THEN RAISE EXCEPTION 'This code is not for your role'; END IF;
++
++  IF v_role = 'hr_company' THEN
++    -- Cleaning companies can join any number of owner groups now.
++    INSERT INTO public.hr_affiliations(owner_group_id, hr_company_user_id)
++    VALUES (v_invite.owner_group_id, v_uid)
++    ON CONFLICT (owner_group_id, hr_company_user_id) DO UPDATE SET status='active';
++  ELSE
++    SELECT count(*) INTO v_count FROM public.memberships
++      WHERE owner_group_id = v_invite.owner_group_id AND role = v_role::text::public.membership_role
++        AND status='active' AND user_id <> v_uid;
++    IF (v_role = 'cleaner' AND v_count >= 3) OR (v_role = 'worker' AND v_count >= 2) THEN
++      RAISE EXCEPTION 'This group has reached its pilot team limit for your role';
++    END IF;
++    INSERT INTO public.memberships(user_id, owner_group_id, role, joined_via_invite_code_id)
++    VALUES (v_uid, v_invite.owner_group_id, v_role::text::public.membership_role, v_invite.id)
++    ON CONFLICT (user_id, owner_group_id, role) DO UPDATE SET status='active';
++  END IF;
++
++  -- Single-use: once someone successfully joins, the code cannot be reused.
++  UPDATE public.invite_codes
++     SET active = false, revoked_at = now()
++   WHERE id = v_invite.id;
++
++  RETURN jsonb_build_object('owner_group_id', v_invite.owner_group_id, 'role', v_role);
++END; $$;
++
++CREATE OR REPLACE FUNCTION public.redeem_hr_invite_code(p_code text)
++RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
++DECLARE
++  v_uid uuid := auth.uid();
++  v_role public.app_role;
++  v_invite public.hr_invite_codes%ROWTYPE;
++BEGIN
++  IF v_uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
++  SELECT primary_role INTO v_role FROM public.profiles WHERE user_id = v_uid;
++  IF v_role IS DISTINCT FROM 'cleaner' THEN RAISE EXCEPTION 'Only cleaners can join an HR company roster'; END IF;
++  SELECT * INTO v_invite FROM public.hr_invite_codes
++   WHERE upper(code) = upper(trim(p_code)) AND active = true AND revoked_at IS NULL
++   FOR UPDATE;
++  IF v_invite.id IS NULL THEN RAISE EXCEPTION 'Invalid or revoked invite code'; END IF;
++  INSERT INTO public.hr_company_roster(hr_company_user_id, cleaner_user_id)
++  VALUES (v_invite.hr_company_user_id, v_uid)
++  ON CONFLICT (hr_company_user_id, cleaner_user_id) DO UPDATE SET status='active';
++  UPDATE public.hr_invite_codes SET active = false, revoked_at = now() WHERE id = v_invite.id;
++  RETURN jsonb_build_object('hr_company_user_id', v_invite.hr_company_user_id);
++END; $$;
++
++-- Owner can kick a cleaning company from their group.
++CREATE OR REPLACE FUNCTION public.kick_hr_company(p_group_id uuid, p_hr_user_id uuid)
++RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
++BEGIN
++  IF NOT public.is_group_owner(auth.uid(), p_group_id) THEN
++    RAISE EXCEPTION 'Only the owner can remove cleaning companies';
++  END IF;
++  UPDATE public.hr_affiliations
++     SET status = 'revoked'
++   WHERE owner_group_id = p_group_id
++     AND hr_company_user_id = p_hr_user_id;
++END; $$;
++GRANT EXECUTE ON FUNCTION public.kick_hr_company(uuid, uuid) TO authenticated;
+--- a/src/routes/_authenticated/dashboard.tsx	2026-07-26 10:12:37.357217341 +0000
++++ b/src/routes/_authenticated/dashboard.tsx	2026-07-26 10:13:29.362830042 +0000
+@@ -20,6 +20,23 @@
+ import { useT, type TranslationKey } from "@/i18n";
+ import { supabase } from "@/integrations/supabase/client";
  
- import { EmptyState, PageHeader } from "@/components/app-shell";
-+import { PhotoPicker } from "@/components/photo-picker";
-+import { SignedPhoto } from "@/components/signed-photo";
-+import { Button } from "@/components/ui/button";
-+import { Checkbox } from "@/components/ui/checkbox";
-+import { useAuthUser } from "@/hooks/use-app";
- import { useT } from "@/i18n";
-+import { supabase } from "@/integrations/supabase/client";
-+import {
-+  holdIdleLogout,
-+  isIdleLogoutHeld,
-+  releaseIdleLogout,
-+} from "@/lib/session-hygiene";
-+import { jobStatusChipClass } from "@/lib/status-colors";
- 
- export const Route = createFileRoute("/_authenticated/jobs")({
++
++// Total tasks (all statuses) across the group — displayed alongside the other stats.
++function useTotalTasksCount(groupId: string | null | undefined) {
++    return useQuery({
++        queryKey: ["dash-total-tasks", groupId],
++        enabled: !!groupId,
++        queryFn: async () => {
++            const { count, error } = await supabase
++                .from("tasks")
++                .select("id", { count: "exact", head: true })
++                .eq("owner_group_id", groupId!);
++            if (error) throw error;
++            return count ?? 0;
++        },
++    });
++}
++
+ export const Route = createFileRoute("/_authenticated/dashboard")({
    head: () => ({
      meta: [
--      { title: "Keyward" },
--      { name: "description", content: "Keyward property operations." },
--      { property: "og:title", content: "Keyward" },
--      { property: "og:description", content: "Keyward property operations." },
-+      { title: "Jobs — Keyward" },
-+      { name: "description", content: "Your assigned jobs and tasks." },
-+      { property: "og:title", content: "Jobs — Keyward" },
-+      { property: "og:description", content: "Your assigned jobs and tasks." },
-       { name: "robots", content: "noindex" },
-     ],
-   }),
--  component: Page,
-+  component: JobsPage,
- });
- 
--function Page() {
-+type Task = {
-+  id: string;
-+  title: string;
-+  description: string | null;
-+  status: "pending" | "in_progress" | "submitted" | "done";
-+  due_at: string | null;
-+  cleaning_job_id: string | null;
-+  proof_photo_path: string | null;
-+  source: string | null;
-+};
-+
-+function useCountdown(dueAt: string | null) {
-+  const [now, setNow] = useState(Date.now());
-+  useEffect(() => {
-+    if (!dueAt) return;
-+    const id = window.setInterval(() => setNow(Date.now()), 1000);
-+    return () => window.clearInterval(id);
-+  }, [dueAt]);
-+  if (!dueAt) return null;
-+  const ms = new Date(dueAt).getTime() - now;
-+  const overdue = ms < 0;
-+  const abs = Math.abs(ms);
-+  const mins = Math.floor(abs / 60000);
-+  const secs = Math.floor((abs % 60000) / 1000);
-+  return { overdue, label: `${mins}:${secs.toString().padStart(2, "0")}` };
-+}
-+
-+function JobsPage() {
-   const t = useT();
-+  const { data: user } = useAuthUser();
-+  const qc = useQueryClient();
-+
-+  const tasksQ = useQuery({
-+    queryKey: ["my-jobs", user?.id],
-+    enabled: !!user?.id,
-+    queryFn: async () => {
-+      const { data, error } = await supabase
-+        .from("tasks")
-+        .select(
-+          "id, title, description, status, due_at, cleaning_job_id, proof_photo_path, source",
-+        )
-+        .eq("assigned_to_user_id", user!.id)
-+        .neq("status", "done")
-+        .order("due_at", { ascending: true, nullsFirst: false });
-+      if (error) throw error;
-+      return data as Task[];
-+    },
-+    refetchInterval: 30_000,
-+  });
-+
-+  const accept = useMutation({
-+    mutationFn: async (id: string) => {
-+      const { error } = await supabase
-+        .from("tasks")
-+        .update({ status: "in_progress" })
-+        .eq("id", id);
-+      if (error) throw error;
-+    },
-+    onSuccess: () => {
-+      // Hold the 15-min idle logout while the user is actively working on a task.
-+      holdIdleLogout();
-+      qc.invalidateQueries({ queryKey: ["my-jobs", user?.id] });
-+    },
-+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
-+  });
-+
-+  const submit = useMutation({
-+    mutationFn: async (id: string) => {
-+      const { error } = await supabase
-+        .from("tasks")
-+        .update({ status: "submitted" })
-+        .eq("id", id);
-+      if (error) throw error;
-+    },
-+    onSuccess: () => {
-+      // Release the hold: the 15-minute inactivity clock resumes.
-+      releaseIdleLogout();
-+      qc.invalidateQueries({ queryKey: ["my-jobs", user?.id] });
-+      toast.success(t("common.saved"));
-+    },
-+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
-+  });
-+
-+  // If the user reloads with an in-progress task and no hold, re-acquire it.
-+  useEffect(() => {
-+    const anyInProgress = (tasksQ.data ?? []).some((task) => task.status === "in_progress");
-+    if (anyInProgress && !isIdleLogoutHeld()) holdIdleLogout();
-+  }, [tasksQ.data]);
-+
-+  const rows = tasksQ.data ?? [];
-+
-   return (
-     <>
-       <PageHeader title={t("nav.jobs")} />
--      <EmptyState />
-+      {rows.length === 0 ? (
-+        <EmptyState />
-+      ) : (
-+        <section className="grid gap-3">
-+          {rows.map((task) => (
-+            <TaskCard
-+              key={task.id}
-+              task={task}
-+              onAccept={() => accept.mutate(task.id)}
-+              onSubmit={() => submit.mutate(task.id)}
-+            />
-+          ))}
-+        </section>
-+      )}
-     </>
+--- a/src/routes/_authenticated/people.tsx	2026-07-26 10:12:37.357865195 +0000
++++ b/src/routes/_authenticated/people.tsx	2026-07-26 10:13:29.406778748 +0000
+@@ -523,3 +523,14 @@
+     </section>
    );
  }
 +
-+function TaskCard({
-+  task,
-+  onAccept,
-+  onSubmit,
-+}: {
-+  task: Task;
-+  onAccept: () => void;
-+  onSubmit: () => void;
-+}) {
-+  const t = useT();
-+  const countdown = useCountdown(task.due_at);
-+  const [proof, setProof] = useState<string | null>(task.proof_photo_path);
-+  const [saveProof, setSaveProof] = useState(false);
-+
-+  const savePhoto = async (path: string | null) => {
-+    setProof(path);
-+    setSaveProof(true);
-+    const { error } = await supabase
-+      .from("tasks")
-+      .update({ proof_photo_path: path })
-+      .eq("id", task.id);
-+    setSaveProof(false);
-+    if (error) toast.error(error.message);
-+  };
-+
-+  return (
-+    <article className="surface space-y-3 p-4">
-+      <header className="flex flex-wrap items-center gap-2">
-+        <h3 className="min-w-0 flex-1 truncate text-base font-medium">{task.title}</h3>
-+        <span className={jobStatusChipClass(task.status)}>
-+          {task.status === "in_progress"
-+            ? t("task.inProgress")
-+            : task.status === "submitted"
-+              ? t("task.submitted")
-+              : t("task.pending")}
-+        </span>
-+        {countdown && (
-+          <span
-+            className={`inline-flex items-center gap-1 text-xs ${
-+              countdown.overdue ? "font-medium text-destructive" : "text-muted-foreground"
-+            }`}
-+          >
-+            <Timer className="h-3.5 w-3.5" aria-hidden="true" />
-+            {countdown.overdue ? `-${countdown.label}` : countdown.label}
-+          </span>
-+        )}
-+      </header>
-+      {task.description && (
-+        <p className="text-sm text-muted-foreground">{task.description}</p>
-+      )}
-+
-+      {task.cleaning_job_id && (
-+        <ChecklistPanel jobId={task.cleaning_job_id} readOnly={task.status !== "in_progress"} />
-+      )}
-+
-+      {task.status !== "pending" && (
-+        <div className="space-y-2">
-+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-+            <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
-+            {t("task.proof")}
-+          </p>
-+          {task.status === "in_progress" ? (
-+            <PhotoPicker
-+              value={proof}
-+              onChange={savePhoto}
-+              folder="task-proof"
-+              label={t("task.proof")}
-+            />
-+          ) : proof ? (
-+            <SignedPhoto path={proof} alt={t("task.proof")} className="h-32 w-full rounded-md object-cover" />
-+          ) : (
-+            <p className="text-xs text-muted-foreground">{t("task.noProof")}</p>
-+          )}
-+        </div>
-+      )}
-+
-+      <footer className="flex flex-wrap justify-end gap-2">
-+        {task.status === "pending" && (
-+          <Button size="sm" onClick={onAccept}>
-+            <Play className="h-4 w-4" aria-hidden="true" />
-+            {t("task.accept") || "Accept"}
-+          </Button>
-+        )}
-+        {task.status === "in_progress" && (
-+          <Button size="sm" disabled={saveProof} onClick={onSubmit}>
-+            <Send className="h-4 w-4" aria-hidden="true" />
-+            {t("task.submit") || "Submit"}
-+          </Button>
-+        )}
-+        {task.status === "submitted" && (
-+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-+            {t("task.submitted")}
-+          </span>
-+        )}
-+      </footer>
-+    </article>
-+  );
++// Owner-only: remove a cleaning company from the group. UI callers wire this
++// to the same "Remove" affordance used for workers/cleaners.
++async function kickHrCompany(groupId: string, hrUserId: string) {
++    const { error } = await supabase.rpc("kick_hr_company", {
++        p_group_id: groupId,
++        p_hr_user_id: hrUserId,
++    });
++    if (error) throw error;
 +}
-+
-+function ChecklistPanel({ jobId, readOnly }: { jobId: string; readOnly: boolean }) {
-+  const t = useT();
-+  const qc = useQueryClient();
-+  const itemsQ = useQuery({
-+    queryKey: ["job-items", jobId],
-+    queryFn: async () => {
-+      const { data, error } = await supabase
-+        .from("cleaning_job_items")
-+        .select("id, description, is_checked, photo_url, sort_order")
-+        .eq("cleaning_job_id", jobId)
-+        .order("sort_order");
-+      if (error) throw error;
-+      return data;
-+    },
-+  });
-+
-+  const toggle = useMutation({
-+    mutationFn: async (item: { id: string; is_checked: boolean }) => {
++export { kickHrCompany };
+--- a/src/routes/_authenticated/properties.$propertyId.tsx	2026-07-26 10:12:37.358283600 +0000
++++ b/src/routes/_authenticated/properties.$propertyId.tsx	2026-07-26 10:13:29.460240461 +0000
+@@ -1,6 +1,6 @@
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
+-import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
++import { ArrowLeft, Trash2, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
+ import { useState } from "react";
+ import { toast } from "sonner";
+ 
+@@ -158,6 +158,31 @@
+     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+   });
+ 
++  const renameStatus = useMutation({
++    mutationFn: async (values: { id: string; label: string }) => {
 +      const { error } = await supabase
-+        .from("cleaning_job_items")
-+        .update({ is_checked: item.is_checked })
-+        .eq("id", item.id);
++        .from("property_statuses")
++        .update({ label: values.label })
++        .eq("id", values.id);
 +      if (error) throw error;
 +    },
-+    onSuccess: () => qc.invalidateQueries({ queryKey: ["job-items", jobId] }),
++    onSuccess: async () => {
++      await qc.invalidateQueries({ queryKey: ["property-statuses", groupId] });
++    },
 +    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
 +  });
 +
-+  const setPhoto = useMutation({
-+    mutationFn: async (item: { id: string; photo_url: string | null }) => {
-+      const { error } = await supabase
-+        .from("cleaning_job_items")
-+        .update({ photo_url: item.photo_url })
-+        .eq("id", item.id);
++  const deleteStatus = useMutation({
++    mutationFn: async (id: string) => {
++      const { error } = await supabase.from("property_statuses").delete().eq("id", id);
 +      if (error) throw error;
 +    },
-+    onSuccess: () => qc.invalidateQueries({ queryKey: ["job-items", jobId] }),
++    onSuccess: async () => {
++      await qc.invalidateQueries({ queryKey: ["property-statuses", groupId] });
++    },
 +    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
 +  });
 +
-+  const items = itemsQ.data ?? [];
-+  if (items.length === 0) return null;
-+
-+  return (
-+    <ul className="space-y-2">
-+      {items.map((item) => (
-+        <li key={item.id} className="rounded-md border border-border p-3 text-sm">
-+          <label className="flex items-start gap-2">
-+            <Checkbox
-+              checked={item.is_checked}
-+              disabled={readOnly}
-+              onCheckedChange={(v) =>
-+                toggle.mutate({ id: item.id, is_checked: v === true })
-+              }
-+            />
-+            <span className="min-w-0 flex-1">{item.description}</span>
-+          </label>
-+          {!readOnly && (
-+            <div className="mt-2">
-+              <PhotoPicker
-+                value={item.photo_url}
-+                onChange={(path) => setPhoto.mutate({ id: item.id, photo_url: path })}
-+                folder="job-item"
-+                label={t("task.proof")}
-+              />
-+            </div>
-+          )}
-+          {readOnly && item.photo_url && (
-+            <SignedPhoto
-+              path={item.photo_url}
-+              alt={item.description}
-+              className="mt-2 h-24 w-full rounded-md object-cover"
-+            />
-+          )}
-+        </li>
-+      ))}
-+    </ul>
-+  );
-+}
---- a/src/routes/_authenticated/tasks.tsx	2026-07-26 10:07:32.088035928 +0000
-+++ b/src/routes/_authenticated/tasks.tsx	2026-07-26 10:10:10.537469849 +0000
-@@ -80,6 +80,20 @@
- 
-   const peopleQ = useGroupMembers(groupId);
- 
-+  const templatesQ = useQuery({
-+    queryKey: ["templates", groupId],
-+    enabled: !!groupId,
-+    queryFn: async () => {
-+      const { data, error } = await supabase
-+        .from("cleaning_templates")
-+        .select("id, name")
-+        .eq("owner_group_id", groupId!)
-+        .order("name");
-+      if (error) throw error;
-+      return data ?? [];
-+    },
-+  });
-+
-   const propsQ = useQuery({
-     queryKey: ["properties", groupId],
-     enabled: !!groupId,
-@@ -203,7 +217,7 @@
-                 {t("task.reopen")}
-               </Button>
-             )}
--            {isOwner && task.source !== "cleaning" && (
-+            {isOwner && (
-               <Button
-                 size="sm"
-                 variant="ghost"
-@@ -226,8 +240,13 @@
-         <CreateTaskDialog
-           groupId={groupId}
-           createdBy={profile.user_id}
--          people={(peopleQ.data ?? []).map((p) => ({ userId: p.user_id, name: p.name }))}
-+          people={(peopleQ.data ?? []).map((p) => ({
-+            userId: p.user_id,
-+            name: p.name,
-+            roles: p.roles,
-+          }))}
-           properties={propsQ.data ?? []}
-+          templates={templatesQ.data ?? []}
-           onClose={() => setCreating(false)}
-         />
-       )}
-@@ -243,30 +262,115 @@
-   );
- }
- 
-+type CreatePerson = { userId: string; name: string; roles: string[] };
-+type CreateTemplate = { id: string; name: string };
-+
-+const DURATION_OPTIONS = Array.from({ length: 24 }, (_, i) => (i + 1) * 5); // 5..120 min
-+
- function CreateTaskDialog({
-   groupId,
-   createdBy,
-   people,
-   properties,
-+  templates,
-   onClose,
- }: {
-   groupId: string;
-   createdBy: string;
--  people: Array<{ userId: string; name: string }>;
-+  people: CreatePerson[];
-   properties: Array<{ id: string; name: string }>;
-+  templates: CreateTemplate[];
-   onClose: () => void;
- }) {
-   const t = useT();
-   const qc = useQueryClient();
-+  const [jobType, setJobType] = useState<"normal" | "cleaning">("normal");
-   const [title, setTitle] = useState("");
-   const [description, setDescription] = useState("");
-   const [assignee, setAssignee] = useState<string>("");
-   const [propertyId, setPropertyId] = useState<string>("none");
-   const [dueAt, setDueAt] = useState("");
-+  const [durationMin, setDurationMin] = useState<string>("");
-+  const [templateId, setTemplateId] = useState<string>("");
-+  const [scheduledAt, setScheduledAt] = useState<string>("");
-   const [isPrivate, setIsPrivate] = useState(false);
- 
-+  // Normal tasks: worker-role assignees only. Cleaning: cleaner-role only.
-+  const allowedRoles = jobType === "cleaning" ? ["cleaner"] : ["worker"];
-+  const eligiblePeople = people.filter((p) =>
-+    p.roles.some((r) => allowedRoles.includes(r)),
-+  );
-+
-+  // Reset assignee when jobType flips so the picker never carries a hidden id.
-+  const onJobTypeChange = (next: "normal" | "cleaning") => {
-+    setJobType(next);
-+    setAssignee("");
-+  };
-+
-+  // "When do you want the job done?" — quick-pick maps to due_at from now.
-+  const resolvedDueAt = () => {
-+    if (durationMin) return new Date(Date.now() + Number(durationMin) * 60_000).toISOString();
-+    return dueAt ? new Date(dueAt).toISOString() : null;
-+  };
-+
-   const create = useMutation({
+   const removeProperty = useMutation({
      mutationFn: async () => {
-+      if (jobType === "cleaning") {
-+        // Materialise a cleaning job + its checklist items so cleaners see the
-+        // template's steps in "My jobs". A companion task row (source=cleaning)
-+        // is created below so both surfaces show the same amount.
-+        if (!templateId) throw new Error("Pick a cleaning template");
-+        const propertyIdVal = propertyId === "none" ? null : propertyId;
-+        const { data: template, error: tErr } = await supabase
-+          .from("cleaning_templates")
-+          .select("id, name, cleaning_template_items ( description, sort_order )")
-+          .eq("id", templateId)
-+          .single();
-+        if (tErr) throw tErr;
-+        const scheduled = scheduledAt ? new Date(scheduledAt).toISOString() : new Date().toISOString();
-+        const { data: job, error: jErr } = await supabase
-+          .from("cleaning_jobs")
-+          .insert({
-+            owner_group_id: groupId,
-+            property_id: propertyIdVal,
-+            template_id: templateId,
-+            scheduled_at: scheduled,
-+            assigned_to_user_id: assignee || null,
-+            status: "pending",
-+          })
-+          .select("id")
-+          .single();
-+        if (jErr) throw jErr;
-+        const items = (template?.cleaning_template_items ?? []) as Array<{
-+          description: string;
-+          sort_order: number;
-+        }>;
-+        if (items.length > 0) {
-+          const { error: iErr } = await supabase.from("cleaning_job_items").insert(
-+            items.map((it) => ({
-+              cleaning_job_id: job!.id,
-+              description: it.description,
-+              sort_order: it.sort_order,
-+              is_checked: false,
-+            })),
-+          );
-+          if (iErr) throw iErr;
-+        }
-+        const { error } = await supabase.from("tasks").insert({
-+          owner_group_id: groupId,
-+          created_by_user_id: createdBy,
-+          assigned_to_user_id: assignee || null,
-+          property_id: propertyIdVal,
-+          title: (title.trim() || template?.name) ?? "Cleaning",
-+          description: description.trim() || null,
-+          due_at: resolvedDueAt(),
-+          is_private: false,
-+          source: "cleaning",
-+          cleaning_job_id: job!.id,
-+        });
-+        if (error) throw error;
-+        return;
-+      }
-       const { error } = await supabase.from("tasks").insert({
-         owner_group_id: groupId,
-         created_by_user_id: createdBy,
-@@ -274,7 +378,7 @@
-         property_id: propertyId === "none" ? null : propertyId,
-         title: title.trim(),
-         description: description.trim() || null,
--        due_at: dueAt ? new Date(dueAt).toISOString() : null,
-+        due_at: resolvedDueAt(),
-         is_private: isPrivate,
-         source: "manual",
-       });
-@@ -296,6 +400,18 @@
-         </DialogHeader>
-         <div className="space-y-4">
-           <div className="space-y-2">
-+            <Label>Job type</Label>
-+            <Select value={jobType} onValueChange={(v) => onJobTypeChange(v as "normal" | "cleaning")}>
-+              <SelectTrigger>
-+                <SelectValue />
-+              </SelectTrigger>
-+              <SelectContent>
-+                <SelectItem value="normal">Normal task</SelectItem>
-+                <SelectItem value="cleaning">Cleaning task</SelectItem>
-+              </SelectContent>
-+            </Select>
-+          </div>
-+          <div className="space-y-2">
-             <Label htmlFor="task-title">{t("common.name")}</Label>
-             <Input id="task-title" value={title} onChange={(e) => setTitle(e.target.value)} />
-           </div>
-@@ -315,7 +431,12 @@
-                 <SelectValue placeholder={t("task.pickAssignee")} />
-               </SelectTrigger>
-               <SelectContent>
--                {people.map((p) => (
-+                {eligiblePeople.length === 0 && (
-+                  <SelectItem value="__none" disabled>
-+                    {jobType === "cleaning" ? "No cleaners in this group" : "No workers in this group"}
-+                  </SelectItem>
-+                )}
-+                {eligiblePeople.map((p) => (
-                   <SelectItem key={p.userId} value={p.userId}>
-                     {p.name}
-                   </SelectItem>
-@@ -339,6 +460,58 @@
-               </SelectContent>
-             </Select>
-           </div>
-+          {jobType === "cleaning" && (
-+            <>
-+              <div className="space-y-2">
-+                <Label>Checklist template</Label>
-+                <Select value={templateId} onValueChange={setTemplateId}>
-+                  <SelectTrigger>
-+                    <SelectValue placeholder="Pick a template" />
-+                  </SelectTrigger>
-+                  <SelectContent>
-+                    {templates.length === 0 && (
-+                      <SelectItem value="__none" disabled>
-+                        No cleaning templates yet
-+                      </SelectItem>
-+                    )}
-+                    {templates.map((tpl) => (
-+                      <SelectItem key={tpl.id} value={tpl.id}>
-+                        {tpl.name}
-+                      </SelectItem>
-+                    ))}
-+                  </SelectContent>
-+                </Select>
-+              </div>
-+              <div className="space-y-2">
-+                <Label htmlFor="task-scheduled">When to execute</Label>
+       const { error } = await supabase.from("properties").delete().eq("id", propertyId);
+@@ -312,8 +337,15 @@
+ 
+           <ul className="space-y-2">
+             {(statusesQ.data ?? []).map((s) => (
+-              <li key={s.id} className="flex items-center justify-between gap-2">
+-                <span className={statusChipClass(s.color)}>{s.label}</span>
++              <li key={s.id} className="flex flex-wrap items-center justify-between gap-2">
 +                <Input
-+                  id="task-scheduled"
-+                  type="datetime-local"
-+                  value={scheduledAt}
-+                  onChange={(e) => setScheduledAt(e.target.value)}
++                  defaultValue={s.label}
++                  className="h-8 max-w-[10rem]"
++                  onBlur={(e) => {
++                    const v = e.currentTarget.value.trim();
++                    if (v && v !== s.label) renameStatus.mutate({ id: s.id, label: v });
++                  }}
 +                />
-+              </div>
-+            </>
-+          )}
-+          <div className="space-y-2">
-+            <Label>When do you want the job done?</Label>
-+            <Select value={durationMin} onValueChange={setDurationMin}>
-+              <SelectTrigger>
-+                <SelectValue placeholder="Pick a duration" />
-+              </SelectTrigger>
-+              <SelectContent>
-+                <SelectItem value="">Custom / no deadline</SelectItem>
-+                {DURATION_OPTIONS.map((min) => (
-+                  <SelectItem key={min} value={String(min)}>
-+                    {min} min
-+                  </SelectItem>
-+                ))}
-+              </SelectContent>
-+            </Select>
-+            <p className="text-xs text-muted-foreground">
-+              Sets a countdown from now. Overrides the manual due date below.
-+            </p>
-+          </div>
-           <div className="space-y-2">
-             <Label htmlFor="task-due">{t("task.due")}</Label>
-             <Input
-@@ -346,12 +519,15 @@
-               type="datetime-local"
-               value={dueAt}
-               onChange={(e) => setDueAt(e.target.value)}
-+              disabled={!!durationMin}
-             />
-           </div>
--          <label className="flex items-center gap-2 text-sm">
--            <Checkbox checked={isPrivate} onCheckedChange={(v) => setIsPrivate(v === true)} />
--            {t("task.private")}
--          </label>
-+          {jobType === "normal" && (
-+            <label className="flex items-center gap-2 text-sm">
-+              <Checkbox checked={isPrivate} onCheckedChange={(v) => setIsPrivate(v === true)} />
-+              {t("task.private")}
-+            </label>
-+          )}
-         </div>
-         <DialogFooter>
-           <Button variant="outline" onClick={onClose}>
+                 <span className="flex items-center gap-1">
+                   {STATUS_COLORS.map((c) => (
+                     <button
+@@ -327,6 +359,16 @@
+                       }`}
+                     />
+                   ))}
++                  <Button
++                    variant="ghost"
++                    size="sm"
++                    aria-label={t("common.delete")}
++                    onClick={() => {
++                      if (window.confirm(t("task.deleteConfirm"))) deleteStatus.mutate(s.id);
++                    }}
++                  >
++                    <Trash2 className="h-4 w-4" aria-hidden="true" />
++                  </Button>
+                 </span>
+               </li>
+             ))}

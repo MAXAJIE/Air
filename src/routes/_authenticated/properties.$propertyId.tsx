@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Trash2, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -150,6 +150,31 @@ function PropertyDetailView() {
         .from("property_statuses")
         .update({ color: values.color })
         .eq("id", values.id);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["property-statuses", groupId] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const renameStatus = useMutation({
+    mutationFn: async (values: { id: string; label: string }) => {
+      const { error } = await supabase
+        .from("property_statuses")
+        .update({ label: values.label })
+        .eq("id", values.id);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["property-statuses", groupId] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const deleteStatus = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("property_statuses").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: async () => {
@@ -312,8 +337,15 @@ function PropertyDetailView() {
 
           <ul className="space-y-2">
             {(statusesQ.data ?? []).map((s) => (
-              <li key={s.id} className="flex items-center justify-between gap-2">
-                <span className={statusChipClass(s.color)}>{s.label}</span>
+              <li key={s.id} className="flex flex-wrap items-center justify-between gap-2">
+                <Input
+                  defaultValue={s.label}
+                  className="h-8 max-w-[10rem]"
+                  onBlur={(e) => {
+                    const v = e.currentTarget.value.trim();
+                    if (v && v !== s.label) renameStatus.mutate({ id: s.id, label: v });
+                  }}
+                />
                 <span className="flex items-center gap-1">
                   {STATUS_COLORS.map((c) => (
                     <button
@@ -327,6 +359,16 @@ function PropertyDetailView() {
                       }`}
                     />
                   ))}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={t("common.delete")}
+                    onClick={() => {
+                      if (window.confirm(t("task.deleteConfirm"))) deleteStatus.mutate(s.id);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </Button>
                 </span>
               </li>
             ))}

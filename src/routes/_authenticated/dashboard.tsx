@@ -20,6 +20,23 @@ import { useActiveGroup, useAuthUser, useProfile } from "@/hooks/use-app";
 import { useT, type TranslationKey } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 
+
+// Total tasks (all statuses) across the group — displayed alongside the other stats.
+function useTotalTasksCount(groupId: string | null | undefined) {
+    return useQuery({
+        queryKey: ["dash-total-tasks", groupId],
+        enabled: !!groupId,
+        queryFn: async () => {
+            const { count, error } = await supabase
+                .from("tasks")
+                .select("id", { count: "exact", head: true })
+                .eq("owner_group_id", groupId!);
+            if (error) throw error;
+            return count ?? 0;
+        },
+    });
+}
+
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
     meta: [
