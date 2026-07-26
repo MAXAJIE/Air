@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, X } from "lucide-react";
+import { Copy, Plus, ShieldCheck, UserRound, X } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/app-shell";
@@ -16,7 +17,6 @@ import { useActiveGroup, useProfile } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { randomCode } from "@/lib/files";
-import { useState } from "react";
 
 export const Route = createFileRoute("/_authenticated/people")({
   head: () => ({
@@ -38,6 +38,14 @@ type InviteRole = "cleaner" | "worker" | "hr_company";
 
 const CAPS: Record<InviteRole, number> = { cleaner: 3, worker: 2, hr_company: 1 };
 
+type Person = {
+  key: string;
+  membershipId: string | null;
+  userId: string;
+  name: string;
+  sub: string;
+};
+
 function PeoplePage() {
   const t = useT();
   const qc = useQueryClient();
@@ -51,7 +59,9 @@ function PeoplePage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("memberships")
-        .select("id, role, status, user_id, profiles:profiles!memberships_user_id_fkey(display_name, username, email)")
+        .select(
+          "id, role, status, user_id, profiles:profiles!memberships_user_id_fkey(display_name, username, email)",
+        )
         .eq("owner_group_id", groupId!)
         .eq("status", "active");
       if (error) throw error;
@@ -69,7 +79,23 @@ function PeoplePage() {
         .eq("owner_group_id", groupId!)
         .eq("status", "active");
       if (error) throw error;
-      return data;
+      if (!data?.length) return [] as Array<{ id: string; user_id: string; name: string; sub: string }>;
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, display_name, username, email")
+        .in(
+          "user_id",
+          data.map((h) => h.hr_company_user_id),
+        );
+      return data.map((h) => {
+        const p = profiles?.find((row) => row.user_id === h.hr_company_user_id);
+        return {
+          id: h.id,
+          user_id: h.hr_company_user_id,
+          name: p?.display_name || p?.username || h.hr_company_user_id.slice(0, 8),
+          sub: p?.email ?? "",
+        };
+      });
     },
   });
 
@@ -138,60 +164,70 @@ function PeoplePage() {
     },
   });
 
+  const byRole = (want: "cleaner" | "worker"): Person[] =>
+    (membersQ.data ?? [])
+      .filter((m) => m.role === want)
+      .map((m) => {
+        const p = m.profiles as unknown as
+          | { display_name: string | null; username: string; email: string }
+          | null;
+        return {
+          key: m.id,
+          membershipId: m.id,
+          userId: m.user_id,
+          name: p?.display_name || p?.username || m.user_id.slice(0, 8),
+          sub: p?.email ?? "",
+        };
+      });
+
+  const companies: Person[] = (hrQ.data ?? []).map((h) => ({
+    key: h.id,
+    membershipId: null,
+    userId: h.user_id,
+    name: h.name,
+    sub: h.sub,
+  }));
+
   const counts: Record<InviteRole, number> = {
-    cleaner: (membersQ.data ?? []).filter((m) => m.role === "cleaner").length,
-    worker: (membersQ.data ?? []).filter((m) => m.role === "worker").length,
-    hr_company: (hrQ.data ?? []).length,
+    cleaner: byRole("cleaner").length,
+    worker: byRole("worker").length,
+    hr_company: companies.length,
   };
 
   return (
     <>
       <PageHeader title={t("people.title")} />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className="surface space-y-3 p-5">
-          <h2 className="text-lg">{t("people.roster")}</h2>
-          <ul className="divide-y divide-border text-sm">
-            {(membersQ.data ?? []).map((m) => {
-              const p = m.profiles as unknown as
-                | { display_name: string | null; username: string; email: string }
-                | null;
-              return (
-                <li key={m.id} className="flex items-center justify-between gap-3 py-2.5">
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">
-                      {p?.display_name || p?.username || m.user_id.slice(0, 8)}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {t(`role.${m.role as "cleaner" | "worker"}`)}
-                    </span>
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => removeMember.mutate(m.id)}
-                    aria-label={t("people.removeMember")}
-                  >
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                </li>
-              );
-            })}
-            {(membersQ.data ?? []).length === 0 && (
-              <li className="py-6 text-center text-muted-foreground">{t("common.none")}</li>
-            )}
-          </ul>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <RoleColumn
+          title={t("people.cleaners")}
+          count={counts.cleaner}
+          cap={CAPS.cleaner}
+          people={byRole("cleaner")}
+          onRemove={(id) => removeMember.mutate(id)}
+        />
+        <RoleColumn
+          title={t("people.workers")}
+          count={counts.worker}
+          cap={CAPS.worker}
+          people={byRole("worker")}
+          onRemove={(id) => removeMember.mutate(id)}
+        />
+        <RoleColumn
+          title={t("people.companies")}
+          count={counts.hr_company}
+          cap={CAPS.hr_company}
+          people={companies}
+          icon="shield"
+        />
+      </div>
 
-          <div className="border-t border-border pt-4">
-            <p className="text-sm font-medium">{t("people.hrCompanies")}</p>
-            <p className="text-sm text-muted-foreground">
-              {counts.hr_company} / {CAPS.hr_company}
-            </p>
-          </div>
-        </section>
-
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <section className="surface space-y-4 p-5">
-          <h2 className="text-lg">{t("people.codes")}</h2>
+          <div>
+            <h2 className="text-lg">{t("people.codes")}</h2>
+            <p className="text-sm text-muted-foreground">{t("people.inviteHint")}</p>
+          </div>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
             <Select value={role} onValueChange={(v) => setRole(v as InviteRole)}>
               <SelectTrigger aria-label={t("people.role")}>
@@ -225,9 +261,22 @@ function PeoplePage() {
                     {t(`role.${c.role as InviteRole}`)}
                   </span>
                 </span>
-                <Button size="sm" variant="outline" onClick={() => revoke.mutate(c.id)}>
-                  {t("people.revoke")}
-                </Button>
+                <span className="flex shrink-0 gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={t("common.copy")}
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(c.code);
+                      toast.success(t("common.copied"));
+                    }}
+                  >
+                    <Copy className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => revoke.mutate(c.id)}>
+                    {t("people.revoke")}
+                  </Button>
+                </span>
               </li>
             ))}
             {(codesQ.data ?? []).length === 0 && (
@@ -236,7 +285,7 @@ function PeoplePage() {
           </ul>
         </section>
 
-        <section className="surface space-y-3 p-5 lg:col-span-2">
+        <section className="surface space-y-3 p-5">
           <h2 className="text-lg">{t("people.selfRole")}</h2>
           <p className="text-sm text-muted-foreground">{t("people.selfRoleHelp")}</p>
           <Select
@@ -255,5 +304,66 @@ function PeoplePage() {
         </section>
       </div>
     </>
+  );
+}
+
+function RoleColumn({
+  title,
+  count,
+  cap,
+  people,
+  onRemove,
+  icon = "user",
+}: {
+  title: string;
+  count: number;
+  cap: number;
+  people: Person[];
+  onRemove?: (membershipId: string) => void;
+  icon?: "user" | "shield";
+}) {
+  const t = useT();
+  const Icon = icon === "shield" ? ShieldCheck : UserRound;
+  return (
+    <section className="surface space-y-3 p-5">
+      <header className="flex items-baseline justify-between gap-2">
+        <h2 className="text-lg">{title}</h2>
+        <span className="text-xs text-muted-foreground">
+          {count} / {cap}
+        </span>
+      </header>
+      <ul className="space-y-2">
+        {people.map((p) => (
+          <li
+            key={p.key}
+            className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
+          >
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground">
+              <Icon className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">{p.name}</span>
+              <span className="block truncate text-xs text-muted-foreground">{p.sub}</span>
+            </span>
+            {onRemove && p.membershipId && (
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0"
+                aria-label={t("people.removeMember")}
+                onClick={() => onRemove(p.membershipId!)}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            )}
+          </li>
+        ))}
+        {people.length === 0 && (
+          <li className="rounded-lg border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+            {t("people.noneInRole")}
+          </li>
+        )}
+      </ul>
+    </section>
   );
 }

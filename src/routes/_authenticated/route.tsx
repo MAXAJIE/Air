@@ -3,8 +3,17 @@ import { redirect } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/app-shell";
 import { ActiveGroupProvider } from "@/hooks/use-app";
+import { useIdleLogout } from "@/hooks/use-idle-logout";
 import { supabase } from "@/integrations/supabase/client";
-import { isUnverifiedExpired, purgeUnverifiedSession } from "@/lib/session-hygiene";
+import {
+  clearPendingVerification,
+  isIdleExpired,
+  isUnverifiedExpired,
+  isVerified,
+  purgeUnverifiedSession,
+  signOutForInactivity,
+  touchActivity,
+} from "@/lib/session-hygiene";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -16,6 +25,15 @@ export const Route = createFileRoute("/_authenticated")({
       await purgeUnverifiedSession(context.queryClient);
       throw redirect({ to: "/auth" });
     }
+    // Verified accounts are kept: they are only signed out after 15 idle minutes.
+    if (isVerified(data.user)) {
+      clearPendingVerification();
+      if (isIdleExpired()) {
+        await signOutForInactivity(context.queryClient);
+        throw redirect({ to: "/auth" });
+      }
+      touchActivity();
+    }
     return { user: data.user };
   },
   component: AuthenticatedLayout,
@@ -23,6 +41,7 @@ export const Route = createFileRoute("/_authenticated")({
 
 function AuthenticatedLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  useIdleLogout();
   // Onboarding screens are full-bleed: no rail, no group switcher.
   if (pathname.startsWith("/onboarding")) return <Outlet />;
 
@@ -34,3 +53,4 @@ function AuthenticatedLayout() {
     </ActiveGroupProvider>
   );
 }
+

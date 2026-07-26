@@ -278,18 +278,24 @@ export type Database = {
         Row: {
           description: string
           id: string
+          notes: string | null
+          requires_photo: boolean
           sort_order: number
           template_id: string
         }
         Insert: {
           description: string
           id?: string
+          notes?: string | null
+          requires_photo?: boolean
           sort_order?: number
           template_id: string
         }
         Update: {
           description?: string
           id?: string
+          notes?: string | null
+          requires_photo?: boolean
           sort_order?: number
           template_id?: string
         }
@@ -609,6 +615,57 @@ export type Database = {
           },
         ]
       }
+      profile_private: {
+        Row: {
+          address_enc: string | null
+          completed: boolean
+          created_at: string
+          dob_enc: string | null
+          emergency_name_enc: string | null
+          emergency_phone_enc: string | null
+          full_name_enc: string | null
+          id_number_enc: string | null
+          id_number_last4: string | null
+          phone_enc: string | null
+          phone_last4: string | null
+          selfie_path: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          address_enc?: string | null
+          completed?: boolean
+          created_at?: string
+          dob_enc?: string | null
+          emergency_name_enc?: string | null
+          emergency_phone_enc?: string | null
+          full_name_enc?: string | null
+          id_number_enc?: string | null
+          id_number_last4?: string | null
+          phone_enc?: string | null
+          phone_last4?: string | null
+          selfie_path?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          address_enc?: string | null
+          completed?: boolean
+          created_at?: string
+          dob_enc?: string | null
+          emergency_name_enc?: string | null
+          emergency_phone_enc?: string | null
+          full_name_enc?: string | null
+          id_number_enc?: string | null
+          id_number_last4?: string | null
+          phone_enc?: string | null
+          phone_last4?: string | null
+          selfie_path?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -655,8 +712,12 @@ export type Database = {
           created_at: string
           default_template_id: string | null
           id: string
+          lat: number | null
+          lng: number | null
           name: string
           owner_group_id: string
+          photo_path: string | null
+          place_name: string | null
           status_id: string | null
         }
         Insert: {
@@ -665,8 +726,12 @@ export type Database = {
           created_at?: string
           default_template_id?: string | null
           id?: string
+          lat?: number | null
+          lng?: number | null
           name: string
           owner_group_id: string
+          photo_path?: string | null
+          place_name?: string | null
           status_id?: string | null
         }
         Update: {
@@ -675,8 +740,12 @@ export type Database = {
           created_at?: string
           default_template_id?: string | null
           id?: string
+          lat?: number | null
+          lng?: number | null
           name?: string
           owner_group_id?: string
+          photo_path?: string | null
+          place_name?: string | null
           status_id?: string | null
         }
         Relationships: [
@@ -807,7 +876,9 @@ export type Database = {
           id: string
           name: string
           owner_group_id: string
+          photo_path: string | null
           price: number
+          sort_order: number
         }
         Insert: {
           active?: boolean
@@ -815,7 +886,9 @@ export type Database = {
           id?: string
           name: string
           owner_group_id: string
+          photo_path?: string | null
           price?: number
+          sort_order?: number
         }
         Update: {
           active?: boolean
@@ -823,7 +896,9 @@ export type Database = {
           id?: string
           name?: string
           owner_group_id?: string
+          photo_path?: string | null
           price?: number
+          sort_order?: number
         }
         Relationships: [
           {
@@ -982,6 +1057,7 @@ export type Database = {
       tasks: {
         Row: {
           assigned_to_user_id: string | null
+          cleaning_job_id: string | null
           created_at: string
           created_by_user_id: string
           description: string | null
@@ -989,11 +1065,15 @@ export type Database = {
           id: string
           is_private: boolean
           owner_group_id: string | null
+          proof_photo_path: string | null
+          property_id: string | null
+          source: string
           status: Database["public"]["Enums"]["task_status"]
           title: string
         }
         Insert: {
           assigned_to_user_id?: string | null
+          cleaning_job_id?: string | null
           created_at?: string
           created_by_user_id: string
           description?: string | null
@@ -1001,11 +1081,15 @@ export type Database = {
           id?: string
           is_private?: boolean
           owner_group_id?: string | null
+          proof_photo_path?: string | null
+          property_id?: string | null
+          source?: string
           status?: Database["public"]["Enums"]["task_status"]
           title: string
         }
         Update: {
           assigned_to_user_id?: string | null
+          cleaning_job_id?: string | null
           created_at?: string
           created_by_user_id?: string
           description?: string | null
@@ -1013,15 +1097,32 @@ export type Database = {
           id?: string
           is_private?: boolean
           owner_group_id?: string | null
+          proof_photo_path?: string | null
+          property_id?: string | null
+          source?: string
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
         }
         Relationships: [
           {
+            foreignKeyName: "tasks_cleaning_job_id_fkey"
+            columns: ["cleaning_job_id"]
+            isOneToOne: false
+            referencedRelation: "cleaning_jobs"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "tasks_owner_group_id_fkey"
             columns: ["owner_group_id"]
             isOneToOne: false
             referencedRelation: "owner_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
             referencedColumns: ["id"]
           },
         ]
@@ -1031,6 +1132,8 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_view_pii: { Args: { _user: string }; Returns: boolean }
+      get_pii: { Args: { _user: string }; Returns: Json }
       group_owner_id: { Args: { _group: string }; Returns: string }
       is_group_member: { Args: { _group: string }; Returns: boolean }
       is_group_owner: { Args: { _group: string }; Returns: boolean }
@@ -1039,9 +1142,23 @@ export type Database = {
       job_group: { Args: { _job: string }; Returns: string }
       order_property: { Args: { _order: string }; Returns: string }
       order_worker: { Args: { _order: string }; Returns: string }
+      pii_key: { Args: never; Returns: string }
       property_group: { Args: { _property: string }; Returns: string }
       redeem_hr_invite_code: { Args: { p_code: string }; Returns: Json }
       redeem_invite_code: { Args: { p_code: string }; Returns: Json }
+      save_my_pii: {
+        Args: {
+          p_address: string
+          p_dob: string
+          p_emergency_name: string
+          p_emergency_phone: string
+          p_full_name: string
+          p_id_number: string
+          p_phone: string
+          p_selfie_path: string
+        }
+        Returns: undefined
+      }
       shares_group_with: { Args: { _other: string }; Returns: boolean }
       submission_property: { Args: { _sub: string }; Returns: string }
       template_group: { Args: { _tpl: string }; Returns: string }
@@ -1061,7 +1178,7 @@ export type Database = {
         | "assigned"
         | "fulfilled"
       request_status: "open" | "assigned" | "resolved"
-      task_status: "pending" | "done"
+      task_status: "pending" | "done" | "in_progress" | "submitted"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1203,7 +1320,7 @@ export const Constants = {
         "fulfilled",
       ],
       request_status: ["open", "assigned", "resolved"],
-      task_status: ["pending", "done"],
+      task_status: ["pending", "done", "in_progress", "submitted"],
     },
   },
 } as const

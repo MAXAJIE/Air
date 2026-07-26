@@ -1,11 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -16,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { useActiveGroup } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
@@ -271,13 +280,22 @@ function JobsPanel() {
   );
 }
 
+type TemplateItem = {
+  id: string;
+  description: string;
+  notes: string | null;
+  requires_photo: boolean;
+  sort_order: number;
+};
+
+type DraftItem = { key: string; description: string; notes: string; requires_photo: boolean };
+
 function TemplatesPanel() {
   const t = useT();
   const qc = useQueryClient();
   const { groupId } = useActiveGroup();
-  const [name, setName] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [itemLabel, setItemLabel] = useState("");
+  const [editing, setEditing] = useState<{ id: string | null } | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   const templatesQ = useQuery({
     queryKey: ["templates", groupId],
@@ -285,7 +303,7 @@ function TemplatesPanel() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("cleaning_templates")
-        .select("id, name")
+        .select("id, name, cleaning_template_items(id)")
         .eq("owner_group_id", groupId!)
         .order("name");
       if (error) throw error;
@@ -293,123 +311,315 @@ function TemplatesPanel() {
     },
   });
 
-  const itemsQ = useQuery({
-    queryKey: ["template-items", selected],
-    enabled: !!selected,
-    queryFn: async () => {
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("cleaning_templates").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["templates", groupId] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg">{t("tpl.title")}</h2>
+        <Button onClick={() => setEditing({ id: null })}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {t("tpl.new")}
+        </Button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {(templatesQ.data ?? []).map((tpl) => (
+          <article key={tpl.id} className="surface flex flex-col gap-3 p-5">
+            <div>
+              <h3 className="truncate font-medium">{tpl.name}</h3>
+              <p className="text-xs text-muted-foreground">
+                {(tpl.cleaning_template_items as unknown as unknown[])?.length ?? 0} {t("tpl.itemCount")}
+              </p>
+            </div>
+            <div className="mt-auto flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => setPreviewId(tpl.id)}>
+                <Eye className="h-4 w-4" aria-hidden="true" />
+                {t("tpl.preview")}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setEditing({ id: tpl.id })}>
+                <Pencil className="h-4 w-4" aria-hidden="true" />
+                {t("common.edit")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  if (window.confirm(t("tpl.deleteConfirm"))) remove.mutate(tpl.id);
+                }}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+          </article>
+        ))}
+        {(templatesQ.data ?? []).length === 0 && (
+          <p className="text-sm text-muted-foreground">{t("common.none")}</p>
+        )}
+      </div>
+
+      {editing && (
+        <TemplateDialog
+          templateId={editing.id}
+          onClose={() => setEditing(null)}
+          groupId={groupId!}
+        />
+      )}
+      {previewId && <TemplatePreview templateId={previewId} onClose={() => setPreviewId(null)} />}
+    </section>
+  );
+}
+
+function useTemplateItems(templateId: string | null) {
+  return useQuery({
+    queryKey: ["template-items", templateId],
+    enabled: !!templateId,
+    queryFn: async (): Promise<TemplateItem[]> => {
       const { data, error } = await supabase
         .from("cleaning_template_items")
-        .select("id, description, sort_order")
-        .eq("template_id", selected!)
+        .select("id, description, notes, requires_photo, sort_order")
+        .eq("template_id", templateId!)
         .order("sort_order");
       if (error) throw error;
       return data;
     },
   });
+}
 
-  const createTemplate = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
+function TemplateDialog({
+  templateId,
+  groupId,
+  onClose,
+}: {
+  templateId: string | null;
+  groupId: string;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const existing = useTemplateItems(templateId);
+  const [name, setName] = useState("");
+  const [items, setItems] = useState<DraftItem[]>([]);
+  const [hydrated, setHydrated] = useState(templateId === null);
+
+  const nameQ = useQuery({
+    queryKey: ["template", templateId],
+    enabled: !!templateId,
+    queryFn: async () => {
+      const { data, error } = await supabase
         .from("cleaning_templates")
-        .insert({ owner_group_id: groupId!, name: name.trim() });
+        .select("name")
+        .eq("id", templateId!)
+        .single();
       if (error) throw error;
+      return data;
+    },
+  });
+
+  useEffect(() => {
+    if (hydrated || !templateId) return;
+    if (nameQ.data && existing.data) {
+      setName(nameQ.data.name);
+      setItems(
+        existing.data.map((i) => ({
+          key: i.id,
+          description: i.description,
+          notes: i.notes ?? "",
+          requires_photo: i.requires_photo,
+        })),
+      );
+      setHydrated(true);
+    }
+  }, [hydrated, templateId, nameQ.data, existing.data]);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      let id = templateId;
+      if (id) {
+        const { error } = await supabase
+          .from("cleaning_templates")
+          .update({ name: name.trim() })
+          .eq("id", id);
+        if (error) throw error;
+        const { error: delError } = await supabase
+          .from("cleaning_template_items")
+          .delete()
+          .eq("template_id", id);
+        if (delError) throw delError;
+      } else {
+        const { data, error } = await supabase
+          .from("cleaning_templates")
+          .insert({ owner_group_id: groupId, name: name.trim() })
+          .select("id")
+          .single();
+        if (error) throw error;
+        id = data.id;
+      }
+      const rows = items
+        .filter((i) => i.description.trim())
+        .map((i, index) => ({
+          template_id: id!,
+          description: i.description.trim(),
+          notes: i.notes.trim() || null,
+          requires_photo: i.requires_photo,
+          sort_order: index + 1,
+        }));
+      if (rows.length) {
+        const { error } = await supabase.from("cleaning_template_items").insert(rows);
+        if (error) throw error;
+      }
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["templates", groupId] });
-      setName("");
+      await qc.invalidateQueries({ queryKey: ["template-items", templateId] });
+      toast.success(t("common.saved"));
+      onClose();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
   });
 
-  const addItem = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase.from("cleaning_template_items").insert({
-        template_id: selected!,
-        description: itemLabel.trim(),
-        sort_order: (itemsQ.data?.length ?? 0) + 1,
-      });
-      if (error) throw error;
-    },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["template-items", selected] });
-      setItemLabel("");
-    },
-  });
-
-  const removeItem = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("cleaning_template_items").delete().eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["template-items", selected] }),
-  });
-
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <section className="surface space-y-3 p-5">
-        <h2 className="text-lg">{t("clean.templates")}</h2>
-        <div className="flex gap-2">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t("clean.templateName")}
-          />
-          <Button disabled={!name.trim() || createTemplate.isPending} onClick={() => createTemplate.mutate()}>
-            <Plus className="h-4 w-4" aria-hidden="true" />
-          </Button>
-        </div>
-        <ul className="divide-y divide-border text-sm">
-          {(templatesQ.data ?? []).map((tpl) => (
-            <li key={tpl.id}>
-              <button
-                type="button"
-                onClick={() => setSelected(tpl.id)}
-                className={`w-full truncate px-1 py-2.5 text-left ${selected === tpl.id ? "font-semibold text-primary" : ""}`}
-              >
-                {tpl.name}
-              </button>
-            </li>
-          ))}
-          {(templatesQ.data ?? []).length === 0 && (
-            <li className="py-6 text-center text-muted-foreground">{t("common.none")}</li>
-          )}
-        </ul>
-      </section>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{templateId ? t("tpl.edit") : t("tpl.new")}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="tpl-name">{t("clean.templateName")}</Label>
+            <Input id="tpl-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
 
-      <section className="surface space-y-3 p-5">
-        <h2 className="text-lg">{t("clean.items")}</h2>
-        {!selected ? (
-          <p className="text-sm text-muted-foreground">{t("common.none")}</p>
-        ) : (
-          <>
-            <div className="flex gap-2">
-              <Input
-                value={itemLabel}
-                onChange={(e) => setItemLabel(e.target.value)}
-                placeholder={t("clean.addItem")}
-              />
-              <Button disabled={!itemLabel.trim() || addItem.isPending} onClick={() => addItem.mutate()}>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label>{t("tpl.items")}</Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setItems((prev) => [
+                    ...prev,
+                    { key: crypto.randomUUID(), description: "", notes: "", requires_photo: false },
+                  ])
+                }
+              >
                 <Plus className="h-4 w-4" aria-hidden="true" />
+                {t("tpl.addItem")}
               </Button>
             </div>
-            <ul className="divide-y divide-border text-sm">
-              {(itemsQ.data ?? []).map((i) => (
-                <li key={i.id} className="flex items-center justify-between gap-3 py-2.5">
-                  <span className="min-w-0 truncate">{i.description}</span>
+
+            {items.length === 0 && (
+              <p className="rounded-md border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+                {t("tpl.empty")}
+              </p>
+            )}
+
+            {items.map((item, index) => (
+              <div key={item.key} className="space-y-2 rounded-lg border border-border p-3">
+                <div className="flex items-start gap-2">
+                  <span className="mt-2 w-5 shrink-0 text-xs text-muted-foreground">{index + 1}.</span>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <Input
+                      value={item.description}
+                      placeholder={t("tpl.itemLabel")}
+                      onChange={(e) =>
+                        setItems((prev) =>
+                          prev.map((row) =>
+                            row.key === item.key ? { ...row, description: e.target.value } : row,
+                          ),
+                        )
+                      }
+                    />
+                    <Textarea
+                      rows={2}
+                      value={item.notes}
+                      placeholder={t("tpl.itemNotes")}
+                      onChange={(e) =>
+                        setItems((prev) =>
+                          prev.map((row) => (row.key === item.key ? { ...row, notes: e.target.value } : row)),
+                        )
+                      }
+                    />
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={item.requires_photo}
+                        onCheckedChange={(checked) =>
+                          setItems((prev) =>
+                            prev.map((row) =>
+                              row.key === item.key ? { ...row, requires_photo: checked === true } : row,
+                            ),
+                          )
+                        }
+                      />
+                      {t("tpl.requiresPhoto")}
+                    </label>
+                  </div>
                   <Button
-                    size="sm"
+                    type="button"
+                    size="icon"
                     variant="ghost"
+                    className="h-8 w-8 shrink-0"
                     aria-label={t("common.delete")}
-                    onClick={() => removeItem.mutate(i.id)}
+                    onClick={() => setItems((prev) => prev.filter((row) => row.key !== item.key))}
                   >
                     <Trash2 className="h-4 w-4" aria-hidden="true" />
                   </Button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </section>
-    </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button disabled={!name.trim() || save.isPending} onClick={() => save.mutate()}>
+            {t("common.save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
+
+function TemplatePreview({ templateId, onClose }: { templateId: string; onClose: () => void }) {
+  const t = useT();
+  const itemsQ = useTemplateItems(templateId);
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t("tpl.preview")}</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">{t("tpl.previewHelp")}</p>
+        <ol className="space-y-2">
+          {(itemsQ.data ?? []).map((item, index) => (
+            <li key={item.id} className="rounded-lg border border-border p-3">
+              <p className="text-sm font-medium">
+                {index + 1}. {item.description}
+              </p>
+              {item.notes && <p className="mt-1 text-xs text-muted-foreground">{item.notes}</p>}
+              {item.requires_photo && (
+                <p className="mt-2 inline-flex rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">
+                  {t("tpl.requiresPhoto")}
+                </p>
+              )}
+            </li>
+          ))}
+          {(itemsQ.data ?? []).length === 0 && (
+            <li className="py-6 text-center text-sm text-muted-foreground">{t("tpl.empty")}</li>
+          )}
+        </ol>
+      </DialogContent>
+    </Dialog>
+  );
+}
+

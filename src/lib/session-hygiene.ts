@@ -5,9 +5,55 @@ import { supabase } from "@/integrations/supabase/client";
 
 /** Unverified accounts get 5 minutes before their local session/cache is wiped. */
 export const UNVERIFIED_TTL_MS = 5 * 60 * 1000;
+/** Verified accounts stay signed in until 15 minutes pass with no interaction. */
+export const INACTIVITY_TTL_MS = 15 * 60 * 1000;
 export const PENDING_VERIFY_KEY = "keyward.pendingVerify";
+export const LAST_ACTIVE_KEY = "keyward.lastActive";
 
 export type PendingVerify = { email: string; at: number };
+
+export function isVerified(user: User | null | undefined): boolean {
+  return Boolean(user && (user.email_confirmed_at || user.confirmed_at));
+}
+
+export function touchActivity(at: number = Date.now()) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LAST_ACTIVE_KEY, String(at));
+}
+
+export function readLastActivity(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(LAST_ACTIVE_KEY);
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function clearActivity() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(LAST_ACTIVE_KEY);
+}
+
+/** True once the last recorded interaction is older than the idle window. */
+export function isIdleExpired(now: number = Date.now()): boolean {
+  const last = readLastActivity();
+  if (last === null) return false;
+  return now - last > INACTIVITY_TTL_MS;
+}
+
+/** Sign out for inactivity: keeps the account, drops only the local session + caches. */
+export async function signOutForInactivity(queryClient?: QueryClient) {
+  clearActivity();
+  if (queryClient) {
+    await queryClient.cancelQueries();
+    queryClient.clear();
+  }
+  try {
+    await supabase.auth.signOut();
+  } catch {
+    // session may already be gone
+  }
+}
+
 
 export function markPendingVerification(email: string) {
   if (typeof window === "undefined") return;

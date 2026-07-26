@@ -11,11 +11,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
+import { PasswordMeter } from "@/components/password-meter";
 import {
   UNVERIFIED_TTL_MS,
+  clearPendingVerification,
+  isVerified,
   markPendingVerification,
   purgeUnverifiedSession,
   readPendingVerification,
+  touchActivity,
 } from "@/lib/session-hygiene";
 
 
@@ -35,15 +39,6 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
-function strengthOf(password: string) {
-  let score = 0;
-  if (password.length >= 8) score += 1;
-  if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score += 1;
-  if (/\d/.test(password)) score += 1;
-  if (/[^A-Za-z0-9]/.test(password)) score += 1;
-  return score;
-}
-
 function AuthPage() {
   const t = useT();
   const navigate = useNavigate();
@@ -60,15 +55,21 @@ function AuthPage() {
   const [forgot, setForgot] = useState(false);
   const queryClient = useQueryClient();
 
-  // Unverified signups get 5 minutes; after that the local session and caches are wiped.
+  // Unverified signups get 5 minutes; verified accounts are never purged here.
   useEffect(() => {
     const pending = readPendingVerification();
     if (!pending) return;
-    const remaining = pending.at + UNVERIFIED_TTL_MS - Date.now();
     const expire = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (isVerified(data.user)) {
+        clearPendingVerification();
+        touchActivity();
+        return;
+      }
       await purgeUnverifiedSession(queryClient);
       toast.error(t("auth.verifyExpired"));
     };
+    const remaining = pending.at + UNVERIFIED_TTL_MS - Date.now();
     if (remaining <= 0) {
       void expire();
       return;
@@ -79,13 +80,7 @@ function AuthPage() {
 
 
 
-  const strengthLabels = [
-    t("auth.strength.weak"),
-    t("auth.strength.weak"),
-    t("auth.strength.fair"),
-    t("auth.strength.good"),
-    t("auth.strength.strong"),
-  ];
+
 
   async function checkUsername(value: string) {
     setUsername(value);
@@ -109,6 +104,7 @@ function AuthPage() {
       }
       const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
       if (error) throw error;
+      touchActivity();
       navigate({ to: "/dashboard" });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("common.error"));
@@ -294,9 +290,8 @@ function AuthPage() {
                       {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
-                  {password.length > 0 && (
-                    <p className="text-xs text-muted-foreground">{strengthLabels[strengthOf(password)]}</p>
-                  )}
+                  <PasswordMeter password={password} userInputs={[email, username]} />
+
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="confirm">{t("auth.confirmPassword")}</Label>

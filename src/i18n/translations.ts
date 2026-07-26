@@ -77,6 +77,8 @@ const en = {
   "auth.passwordUpdated": "Password updated. You can sign in now.",
   "auth.checkEmail": "Confirm your email address to finish signing up.",
   "auth.verifyExpired": "Verification link expired after 5 minutes. Sign up again to get a new one.",
+  "auth.idleLogout": "Signed out after 15 minutes of inactivity.",
+
 
   "auth.usernameTaken": "That username is taken",
   "auth.usernameFree": "Username is available",
@@ -320,11 +322,104 @@ const en = {
   "landing.f4Body":
     "Guests open your property link, type their stay code, and can report conditions, raise requests or order supplies.",
   "landing.footer": "Pilot build — no billing, hard-coded team limits.",
+
+  "view.grid": "Grid",
+  "view.list": "List",
+
+  "prop.cover": "Cover photo",
+  "prop.coverAdd": "Add a cover photo",
+  "prop.location": "Location",
+  "prop.edit": "Edit property",
+
+  "people.owners": "Owners",
+  "people.cleaners": "Cleaners",
+  "people.workers": "Workers",
+  "people.companies": "Cleaning companies",
+  "people.noneInRole": "No one in this role yet",
+  "people.contact": "Contact details",
+  "people.reveal": "Reveal details",
+  "people.hide": "Hide details",
+  "people.encrypted": "Encrypted — visible to you as group owner",
+  "people.inviteHint": "Share a code with the person you want to add. They redeem it after signing up.",
+
+  "tpl.title": "Checklist templates",
+  "tpl.new": "New template",
+  "tpl.edit": "Edit template",
+  "tpl.preview": "Preview",
+  "tpl.previewHelp": "This is exactly what the cleaner sees on their phone.",
+  "tpl.items": "Checklist items",
+  "tpl.addItem": "Add an item",
+  "tpl.itemLabel": "What needs doing",
+  "tpl.itemNotes": "Notes for the cleaner",
+  "tpl.requiresPhoto": "Photo required",
+  "tpl.empty": "No items yet. Add the first step of this clean.",
+  "tpl.deleteConfirm": "Delete this template? Jobs already dispatched keep their own copy.",
+  "tpl.itemCount": "items",
+
+  "shop.item": "Catalog item",
+  "shop.editItem": "Edit item",
+  "shop.itemName": "Item name",
+  "shop.itemDesc": "Description",
+  "shop.itemPhoto": "Item photo",
+  "shop.active": "Visible to guests",
+  "shop.deleteConfirm": "Remove this item from the catalog?",
+  "shop.previewList": "Preview shopping list",
+  "shop.previewHelp": "The guest view, with warnings for anything that would look broken.",
+  "shop.issues": "Issues found",
+  "shop.noIssues": "Everything looks good — no missing prices, photos or names.",
+  "shop.issueNoPhoto": "No photo",
+  "shop.issueNoPrice": "Price is zero",
+  "shop.issueNoDesc": "No description",
+  "shop.issueDuplicate": "Duplicate name",
+  "shop.issueHidden": "Hidden from guests",
+
+  "task.list": "Task list",
+  "task.create": "Create task",
+  "task.assignee": "Who will do it",
+  "task.pickAssignee": "Pick a person",
+  "task.fromCleaning": "From cleaning plan",
+  "task.manual": "Manual",
+  "task.inProgress": "In progress",
+  "task.submitted": "Submitted",
+  "task.proof": "Submitted photos",
+  "task.noProof": "No photos submitted yet",
+  "task.approve": "Approve",
+  "task.reopen": "Reopen",
+  "task.filterAll": "All",
+  "task.deleteConfirm": "Delete this task?",
+  "task.checklist": "Cleaning checklist",
+
+  "profile.account": "Account",
+  "profile.personal": "Personal details",
+  "profile.encryptedNote": "Encrypted before it is stored. Only you, your group owner and your cleaning company can read it.",
+  "profile.fullName": "Full legal name",
+  "profile.idNumber": "IC / passport number",
+  "profile.phone": "Phone number",
+  "profile.dob": "Date of birth",
+  "profile.address": "Home address",
+  "profile.emergencyName": "Emergency contact name",
+  "profile.emergencyPhone": "Emergency contact phone",
+  "profile.selfie": "Selfie",
+  "profile.selfieHelp": "A clear photo of your face, used to verify who turns up on site.",
+  "profile.incomplete": "Your personal details are incomplete.",
+  "profile.complete": "Personal details complete",
+  "profile.security": "Security",
+  "profile.changePassword": "Change password",
+  "profile.newPassword": "New password",
+
+  "pw.strength": "Password strength",
+  "pw.veryWeak": "Very weak",
+  "pw.weak": "Weak",
+  "pw.fair": "Fair",
+  "pw.strong": "Strong",
+  "pw.veryStrong": "Very strong",
+  "pw.crackTime": "Estimated time to crack",
+  "pw.tooWeak": "Pick a stronger password before continuing.",
 };
 
 type Dict = typeof en;
 
-const zhHans: Dict = {
+const zhHans: Partial<Dict> = {
   "app.name": "Keyward 管家",
   "app.tagline": "在一个平台管理每一处房源、每一次清洁、每一个客人需求。",
 
@@ -636,7 +731,7 @@ const zhHans: Dict = {
   "landing.footer": "试点版本 — 无计费，团队规模为固定上限。",
 };
 
-const zhHant: Dict = {
+const zhHant: Partial<Dict> = {
   ...zhHans,
   "app.name": "Keyward 管家",
   "app.tagline": "在一個平台管理每一處房源、每一次清潔、每一個客人需求。",
@@ -734,7 +829,7 @@ const zhHant: Dict = {
   "landing.ctaSecondary": "我有邀請碼",
 };
 
-export const dictionaries: Record<Locale, Dict> = {
+export const dictionaries: Record<Locale, Partial<Dict>> & { en: Dict } = {
   en,
   "zh-Hans": zhHans,
   "zh-Hant": zhHant,

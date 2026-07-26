@@ -1,12 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, CheckCircle2, Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/app-shell";
+import { PhotoPicker } from "@/components/photo-picker";
 import { SignedPhoto } from "@/components/signed-photo";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -17,6 +26,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  COVER_HEIGHT,
+  GRID_COLS,
+  ViewToggle,
+  useViewPrefs,
+  type CardSize,
+  type ViewMode,
+} from "@/components/view-toggle";
 import { useActiveGroup } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
@@ -48,6 +66,7 @@ function ShopPage() {
         <TabsList>
           <TabsTrigger value="orders">{t("shop.orders")}</TabsTrigger>
           <TabsTrigger value="catalog">{t("shop.catalog")}</TabsTrigger>
+          <TabsTrigger value="preview">{t("shop.previewList")}</TabsTrigger>
           <TabsTrigger value="qr">{t("shop.qr")}</TabsTrigger>
         </TabsList>
         <TabsContent value="orders" className="mt-4">
@@ -55,6 +74,9 @@ function ShopPage() {
         </TabsContent>
         <TabsContent value="catalog" className="mt-4">
           <CatalogPanel />
+        </TabsContent>
+        <TabsContent value="preview" className="mt-4">
+          <PreviewPanel />
         </TabsContent>
         <TabsContent value="qr" className="mt-4">
           <QrPanel />
@@ -150,7 +172,11 @@ function OrdersPanel() {
             {t("shop.amountEntered")}: {o.payment_proof_amount_entered ?? "—"}
           </p>
           {o.payment_proof_photo_url && (
-            <SignedPhoto path={o.payment_proof_photo_url} alt={t("shop.proof")} className="h-40 w-full rounded-md object-cover" />
+            <SignedPhoto
+              path={o.payment_proof_photo_url}
+              alt={t("shop.proof")}
+              className="h-40 w-full rounded-md object-cover"
+            />
           )}
           {o.status === "proof_submitted" && (
             <Button
@@ -189,7 +215,11 @@ function OrdersPanel() {
             </Select>
           )}
           {o.status === "assigned" && (
-            <Button size="sm" variant="outline" onClick={() => patch.mutate({ id: o.id, values: { status: "fulfilled" } })}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => patch.mutate({ id: o.id, values: { status: "fulfilled" } })}
+            >
               {t("shop.fulfil")}
             </Button>
           )}
@@ -202,71 +232,341 @@ function OrdersPanel() {
   );
 }
 
-function CatalogPanel() {
-  const t = useT();
-  const qc = useQueryClient();
-  const { groupId } = useActiveGroup();
-  const [name, setName] = useState("");
-  const [price, setPrice] = useState("0");
+type CatalogItem = {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  photo_path: string | null;
+  active: boolean;
+  sort_order: number;
+};
 
-  const itemsQ = useQuery({
+function useCatalog(groupId: string | null) {
+  return useQuery({
     queryKey: ["shopping-items", groupId],
     enabled: !!groupId,
-    queryFn: async () => {
+    queryFn: async (): Promise<CatalogItem[]> => {
       const { data, error } = await supabase
         .from("shopping_items")
-        .select("id, name, price, active")
+        .select("id, name, description, price, photo_path, active, sort_order")
         .eq("owner_group_id", groupId!)
+        .order("sort_order")
         .order("name");
       if (error) throw error;
       return data;
     },
   });
+}
 
-  const add = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from("shopping_items")
-        .insert({ owner_group_id: groupId!, name: name.trim(), price: Number(price) || 0 });
+function CatalogPanel() {
+  const t = useT();
+  const qc = useQueryClient();
+  const { groupId } = useActiveGroup();
+  const itemsQ = useCatalog(groupId);
+  const prefs = useViewPrefs("shop-catalog");
+  const [view, setView] = useState<ViewMode>("grid");
+  const [size, setSize] = useState<CardSize>("md");
+  const [editing, setEditing] = useState<CatalogItem | null | undefined>(undefined);
+
+  useEffect(() => {
+    const saved = prefs.read();
+    setView(saved.view);
+    setSize(saved.size);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("shopping_items").delete().eq("id", id);
       if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["shopping-items", groupId] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const items = itemsQ.data ?? [];
+
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg">{t("shop.catalog")}</h2>
+        <div className="flex items-center gap-2">
+          <ViewToggle
+            view={view}
+            size={size}
+            onView={(v) => {
+              setView(v);
+              prefs.write({ view: v, size });
+            }}
+            onSize={(s) => {
+              setSize(s);
+              prefs.write({ view, size: s });
+            }}
+          />
+          <Button onClick={() => setEditing(null)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            {t("shop.addItem")}
+          </Button>
+        </div>
+      </div>
+
+      {view === "grid" ? (
+        <div className={GRID_COLS[size]}>
+          {items.map((item) => (
+            <article key={item.id} className="surface flex flex-col overflow-hidden">
+              {item.photo_path ? (
+                <SignedPhoto
+                  path={item.photo_path}
+                  alt={item.name}
+                  className={`w-full object-cover ${COVER_HEIGHT[size]}`}
+                />
+              ) : (
+                <div
+                  className={`flex w-full items-center justify-center bg-muted text-xs text-muted-foreground ${COVER_HEIGHT[size]}`}
+                >
+                  {t("shop.issueNoPhoto")}
+                </div>
+              )}
+              <div className="flex flex-1 flex-col gap-2 p-4">
+                <p className="truncate font-medium">{item.name}</p>
+                <p className="text-sm text-muted-foreground">{item.price}</p>
+                <div className="mt-auto flex gap-2 pt-2">
+                  <Button size="sm" variant="outline" onClick={() => setEditing(item)}>
+                    <Pencil className="h-4 w-4" aria-hidden="true" />
+                    {t("common.edit")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={t("common.delete")}
+                    onClick={() => {
+                      if (window.confirm(t("shop.deleteConfirm"))) remove.mutate(item.id);
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <ul className="surface divide-y divide-border">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center gap-3 p-3">
+              {item.photo_path ? (
+                <SignedPhoto
+                  path={item.photo_path}
+                  alt={item.name}
+                  className="h-12 w-12 shrink-0 rounded-md object-cover"
+                />
+              ) : (
+                <span className="h-12 w-12 shrink-0 rounded-md bg-muted" />
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{item.name}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {item.description ?? ""}
+                </span>
+              </span>
+              <span className="shrink-0 text-sm text-muted-foreground">{item.price}</span>
+              <Button size="sm" variant="outline" onClick={() => setEditing(item)}>
+                <Pencil className="h-4 w-4" aria-hidden="true" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={t("common.delete")}
+                onClick={() => {
+                  if (window.confirm(t("shop.deleteConfirm"))) remove.mutate(item.id);
+                }}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {items.length === 0 && <p className="text-sm text-muted-foreground">{t("common.none")}</p>}
+
+      {editing !== undefined && (
+        <ItemDialog item={editing} groupId={groupId!} onClose={() => setEditing(undefined)} />
+      )}
+    </section>
+  );
+}
+
+function ItemDialog({
+  item,
+  groupId,
+  onClose,
+}: {
+  item: CatalogItem | null;
+  groupId: string;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [name, setName] = useState(item?.name ?? "");
+  const [description, setDescription] = useState(item?.description ?? "");
+  const [price, setPrice] = useState(String(item?.price ?? 0));
+  const [photo, setPhoto] = useState<string | null>(item?.photo_path ?? null);
+  const [active, setActive] = useState(item?.active ?? true);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const values = {
+        name: name.trim(),
+        description: description.trim() || null,
+        price: Number(price) || 0,
+        photo_path: photo,
+        active,
+      };
+      if (item) {
+        const { error } = await supabase.from("shopping_items").update(values).eq("id", item.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("shopping_items")
+          .insert({ ...values, owner_group_id: groupId });
+        if (error) throw error;
+      }
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["shopping-items", groupId] });
-      setName("");
-      setPrice("0");
+      toast.success(t("common.saved"));
+      onClose();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
   });
 
   return (
-    <section className="surface max-w-xl space-y-3 p-5">
-      <h2 className="text-lg">{t("shop.catalog")}</h2>
-      <div className="grid grid-cols-[minmax(0,1fr)_7rem_auto] gap-2">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("common.name")} />
-        <Input
-          type="number"
-          min={0}
-          step="0.01"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          aria-label={t("shop.price")}
-        />
-        <Button disabled={!name.trim() || add.isPending} onClick={() => add.mutate()}>
-          <Plus className="h-4 w-4" aria-hidden="true" />
-        </Button>
-      </div>
-      <ul className="divide-y divide-border text-sm">
-        {(itemsQ.data ?? []).map((i) => (
-          <li key={i.id} className="flex items-center justify-between gap-3 py-2.5">
-            <span className="min-w-0 truncate">{i.name}</span>
-            <span className="shrink-0 text-muted-foreground">{i.price}</span>
-          </li>
-        ))}
-        {(itemsQ.data ?? []).length === 0 && (
-          <li className="py-6 text-center text-muted-foreground">{t("common.none")}</li>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{item ? t("shop.editItem") : t("shop.addItem")}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <PhotoPicker value={photo} onChange={setPhoto} folder="shop" label={t("shop.itemPhoto")} />
+          <div className="space-y-2">
+            <Label htmlFor="item-name">{t("shop.itemName")}</Label>
+            <Input id="item-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="item-desc">{t("shop.itemDesc")}</Label>
+            <Textarea
+              id="item-desc"
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="item-price">{t("shop.price")}</Label>
+            <Input
+              id="item-price"
+              type="number"
+              min={0}
+              step="0.01"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <Checkbox checked={active} onCheckedChange={(v) => setActive(v === true)} />
+            {t("shop.active")}
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button disabled={!name.trim() || save.isPending} onClick={() => save.mutate()}>
+            {t("common.save")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PreviewPanel() {
+  const t = useT();
+  const { groupId } = useActiveGroup();
+  const itemsQ = useCatalog(groupId);
+  const items = itemsQ.data ?? [];
+
+  const issues = items.flatMap((item) => {
+    const list: string[] = [];
+    if (!item.photo_path) list.push(t("shop.issueNoPhoto"));
+    if (!item.price) list.push(t("shop.issueNoPrice"));
+    if (!item.description) list.push(t("shop.issueNoDesc"));
+    if (items.filter((row) => row.name.trim().toLowerCase() === item.name.trim().toLowerCase()).length > 1)
+      list.push(t("shop.issueDuplicate"));
+    if (!item.active) list.push(t("shop.issueHidden"));
+    return list.map((label) => ({ id: `${item.id}-${label}`, name: item.name, label }));
+  });
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <section className="surface space-y-4 p-5">
+        <div>
+          <h2 className="text-lg">{t("shop.previewList")}</h2>
+          <p className="text-sm text-muted-foreground">{t("shop.previewHelp")}</p>
+        </div>
+        <ul className="divide-y divide-border">
+          {items
+            .filter((item) => item.active)
+            .map((item) => (
+              <li key={item.id} className="flex items-center gap-3 py-3">
+                {item.photo_path ? (
+                  <SignedPhoto
+                    path={item.photo_path}
+                    alt={item.name}
+                    className="h-14 w-14 shrink-0 rounded-md object-cover"
+                  />
+                ) : (
+                  <span className="h-14 w-14 shrink-0 rounded-md bg-muted" />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{item.name}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {item.description ?? ""}
+                  </span>
+                </span>
+                <span className="shrink-0 text-sm">{item.price}</span>
+              </li>
+            ))}
+          {items.filter((item) => item.active).length === 0 && (
+            <li className="py-6 text-center text-sm text-muted-foreground">{t("common.none")}</li>
+          )}
+        </ul>
+      </section>
+
+      <section className="surface space-y-3 p-5">
+        <h2 className="text-lg">{t("shop.issues")}</h2>
+        {issues.length === 0 ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+            {t("shop.noIssues")}
+          </p>
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {issues.map((issue) => (
+              <li key={issue.id} className="flex items-start gap-2 rounded-md border border-border p-2.5">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{issue.name}</span>
+                  <span className="block text-xs text-muted-foreground">{issue.label}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
-      </ul>
-    </section>
+      </section>
+    </div>
   );
 }
 
@@ -294,9 +594,14 @@ function QrPanel() {
   async function onFile(file: File) {
     setBusy(true);
     try {
-      const base64 = await fileToBase64(file);
+      const dataBase64 = await fileToBase64(file);
       const { path } = await uploadPhoto({
-        data: { base64, contentType: file.type, folder: `qr/${groupId}` },
+        data: {
+          folder: "qr",
+          fileName: file.name,
+          contentType: file.type || "image/png",
+          dataBase64,
+        },
       });
       const { error } = await supabase
         .from("payment_qr_codes")
@@ -316,7 +621,11 @@ function QrPanel() {
       <h2 className="text-lg">{t("shop.qr")}</h2>
       <p className="text-sm text-muted-foreground">{t("shop.qrHelp")}</p>
       {qrQ.data?.qr_image_url && (
-        <SignedPhoto path={qrQ.data.qr_image_url} alt={t("shop.qr")} className="h-56 w-56 rounded-md object-contain" />
+        <SignedPhoto
+          path={qrQ.data.qr_image_url}
+          alt={t("shop.qr")}
+          className="h-56 w-56 rounded-md object-contain"
+        />
       )}
       <div className="space-y-2">
         <Label htmlFor="qr-file">{t("shop.uploadQr")}</Label>
