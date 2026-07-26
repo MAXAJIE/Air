@@ -325,7 +325,7 @@ function CleanerDashboard() {
       title: task.title,
       meta: `${t(TASK_STATUS_KEY[task.status] ?? "task.pending")} · ${shortDate(task.due_at ?? task.created_at)}`,
     })),
-  ];
+  ].slice(0, 8);
 
   return (
     <>
@@ -396,7 +396,7 @@ function WorkerDashboard() {
       title: request.description,
       meta: `${request.status} · ${shortDate(request.created_at)}`,
     })),
-  ];
+  ].slice(0, 8);
 
   return (
     <>

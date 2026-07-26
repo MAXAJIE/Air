@@ -1,254 +1,517 @@
-diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/src/components/app-shell.tsx air/src/components/app-shell.tsx
---- air-orig/src/components/app-shell.tsx	2026-07-26 10:57:00.803825746 +0000
-+++ air/src/components/app-shell.tsx	2026-07-26 10:58:56.537492524 +0000
-@@ -61,14 +61,15 @@
-     { to: "/jobs", labelKey: "nav.jobs", icon: ClipboardList },
-     { to: "/people", labelKey: "nav.myHires", icon: Users },
-     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
-+    { to: "/history", labelKey: "nav.history", icon: ListChecks },
-     { to: "/performance", labelKey: "nav.performance", icon: TrendingUp },
-     { to: "/profile", labelKey: "nav.profile", icon: User },
-   ],
-   worker: [
-     { to: "/dashboard", labelKey: "nav.dashboard", icon: Gauge },
--    { to: "/shop", labelKey: "nav.shop", icon: ShoppingCart },
-     { to: "/people", labelKey: "nav.myHires", icon: Users },
-     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
-+    { to: "/history", labelKey: "nav.history", icon: ListChecks },
-     { to: "/profile", labelKey: "nav.profile", icon: User },
-   ],
-   hr_company: [
-diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/src/i18n/translations.ts air/src/i18n/translations.ts
---- air-orig/src/i18n/translations.ts	2026-07-26 10:57:00.813138289 +0000
-+++ air/src/i18n/translations.ts	2026-07-26 10:59:08.024811514 +0000
-@@ -24,6 +24,7 @@
-   "nav.inbox": "Task inbox",
-   "nav.profile": "Profile",
-   "nav.signOut": "Sign out",
-+  "nav.history": "History",
+--- a/src/lib/status-colors.ts	2026-07-26 11:09:20.559016075 +0000
++++ b/src/lib/status-colors.ts	2026-07-26 11:09:33.015733519 +0000
+@@ -1,3 +1,4 @@
++import type React from "react";
+ /**
+  * Status colours live as semantic utilities in styles.css (`status-chip-*`).
+  * Components never hardcode colour values — they map a status to a palette key.
+@@ -12,12 +13,14 @@
  
-   "common.save": "Save",
-   "common.cancel": "Cancel",
-@@ -447,7 +448,7 @@
+ /** Chip classes for an explicit palette key (falls back to slate). */
+ export function statusChipClass(color: string | null | undefined): string {
++  if (isHexColor(color)) return "status-chip";
+   const key: StatusColor = isStatusColor(color) ? color : "slate";
+   return `status-chip status-chip-${key}`;
+ }
  
-   "profile.account": "Account",
-   "profile.personal": "Personal details",
--  "profile.encryptedNote": "Encrypted before it is stored. Only you, your group owner and your cleaning company can read it.",
-+  "profile.encryptedNote": "Encrypted before it is stored. Only you and your group owner can read it.",
-   "profile.fullName": "Full legal name",
-   "profile.idNumber": "IC / passport number",
-   "profile.phone": "Phone number",
-diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/src/routes/_authenticated/people.tsx air/src/routes/_authenticated/people.tsx
---- air-orig/src/routes/_authenticated/people.tsx	2026-07-26 10:57:00.821788824 +0000
-+++ air/src/routes/_authenticated/people.tsx	2026-07-26 10:59:46.599248151 +0000
-@@ -183,6 +183,19 @@
-     onSuccess: () => qc.invalidateQueries({ queryKey: ["members", groupId] }),
-   });
+ /** Small round colour swatch, used by the palette picker and list dots. */
+ export function statusDotClass(color: string | null | undefined): string {
++  if (isHexColor(color)) return "inline-block h-4 w-4 rounded-full";
+   const key: StatusColor = isStatusColor(color) ? color : "slate";
+   return `status-dot-${key}`;
+ }
+@@ -42,3 +45,45 @@
+ export function jobStatusChipClass(status: string | null | undefined): string {
+   return statusChipClass(jobStatusColor(status));
+ }
++
++/** True when `color` is a #RRGGBB / #RGB hex value chosen from the color wheel. */
++export function isHexColor(value: string | null | undefined): value is string {
++  return !!value && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
++}
++
++/**
++ * Inline styles for a status chip when the color is an arbitrary hex value.
++ * Returns an empty object for palette-key colors (styles.css utilities apply).
++ */
++export function statusChipStyle(color: string | null | undefined): React.CSSProperties {
++  if (!isHexColor(color)) return {};
++  return {
++    backgroundColor: color!,
++    color: readableTextOn(color!),
++    borderColor: "transparent",
++  };
++}
++
++/** Inline style for a status dot when the color is an arbitrary hex value. */
++export function statusDotStyle(color: string | null | undefined): React.CSSProperties {
++  if (!isHexColor(color)) return {};
++  return { backgroundColor: color! };
++}
++
++/** Pick black/white text for adequate contrast on the supplied hex background. */
++function readableTextOn(hex: string): string {
++  const h = hex.replace("#", "");
++  const full =
++    h.length === 3
++      ? h
++          .split("")
++          .map((c) => c + c)
++          .join("")
++      : h;
++  const r = parseInt(full.slice(0, 2), 16);
++  const g = parseInt(full.slice(2, 4), 16);
++  const b = parseInt(full.slice(4, 6), 16);
++  // Rec. 601 luma.
++  const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
++  return luma > 0.6 ? "#111827" : "#ffffff";
++}
+--- a/src/routes/_authenticated/properties.index.tsx	2026-07-26 11:09:20.574816858 +0000
++++ b/src/routes/_authenticated/properties.index.tsx	2026-07-26 11:11:20.009871838 +0000
+@@ -1,7 +1,7 @@
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { createFileRoute, Link } from "@tanstack/react-router";
+-import { ExternalLink, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+-import { useState } from "react";
++import { ExternalLink, Filter, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
++import { useMemo, useState } from "react";
+ import { toast } from "sonner";
  
-+  // Owner-only: kick a cleaning company from this group.
-+  const removeCompany = useMutation({
-+    mutationFn: async (hrUserId: string) => {
-+      const { error } = await supabase.rpc("kick_hr_company", {
-+        p_group_id: groupId!,
-+        p_hr_user_id: hrUserId,
-+      });
+ import { AddressPicker, type PlaceValue } from "@/components/address-picker";
+@@ -31,7 +31,14 @@
+ import { useT } from "@/i18n";
+ import { supabase } from "@/integrations/supabase/client";
+ import { randomCode } from "@/lib/files";
+-import { statusChipClass } from "@/lib/status-colors";
++import { statusChipClass, statusChipStyle } from "@/lib/status-colors";
++import {
++  Select,
++  SelectContent,
++  SelectItem,
++  SelectTrigger,
++  SelectValue,
++} from "@/components/ui/select";
+ 
+ export const Route = createFileRoute("/_authenticated/properties/")({
+   head: () => ({
+@@ -69,6 +76,8 @@
+   const [place, setPlace] = useState<PlaceValue>(EMPTY_PLACE);
+   const [photoPath, setPhotoPath] = useState<string | null>(null);
+   const [edit, setEdit] = useState<EditState | null>(null);
++  // "" = All, "none" = Unassigned, else the status id
++  const [statusFilter, setStatusFilter] = useState<string>("");
+ 
+   const setViewMode = (v: ViewMode) => {
+     setView(v);
+@@ -174,6 +183,13 @@
+ 
+   type PropertyRow = NonNullable<typeof properties>[number];
+ 
++  const filtered = useMemo<PropertyRow[]>(() => {
++    const rows = properties ?? [];
++    if (!statusFilter) return rows;
++    if (statusFilter === "none") return rows.filter((r) => !r.status_id);
++    return rows.filter((r) => r.status_id === statusFilter);
++  }, [properties, statusFilter]);
++
+   const startEdit = (p: PropertyRow) =>
+     setEdit({
+       id: p.id,
+@@ -235,6 +251,23 @@
+         title={t("prop.title")}
+         action={
+           <div className="flex items-center gap-2">
++            <div className="hidden sm:flex items-center gap-1 text-muted-foreground">
++              <Filter className="h-4 w-4" aria-hidden="true" />
++            </div>
++            <Select value={statusFilter || "__all"} onValueChange={(v) => setStatusFilter(v === "__all" ? "" : v)}>
++              <SelectTrigger className="h-8 w-[9rem]">
++                <SelectValue />
++              </SelectTrigger>
++              <SelectContent>
++                <SelectItem value="__all">All</SelectItem>
++                <SelectItem value="none">{t("common.unassigned")}</SelectItem>
++                {(statuses ?? []).map((s) => (
++                  <SelectItem key={s.id} value={s.id}>
++                    {s.label}
++                  </SelectItem>
++                ))}
++              </SelectContent>
++            </Select>
+             <ViewToggle view={view} onView={setViewMode} size={size} onSize={setCardSize} />
+             <Dialog open={open} onOpenChange={setOpen}>
+               <DialogTrigger asChild>
+@@ -279,9 +312,11 @@
+         </div>
+       ) : (properties ?? []).length === 0 ? (
+         <EmptyState />
++      ) : filtered.length === 0 ? (
++        <EmptyState />
+       ) : view === "list" ? (
+         <ul className="surface divide-y divide-border">
+-          {properties!.map((p) => (
++          {filtered.map((p) => (
+             <li key={p.id} className="flex items-center gap-1 pr-2 transition-colors hover:bg-accent">
+               <Link
+                 to="/properties/$propertyId"
+@@ -299,7 +334,10 @@
+                   <span className="block truncate font-medium">{p.name}</span>
+                   <span className="block truncate text-xs text-muted-foreground">{p.address ?? "—"}</span>
+                 </span>
+-                <span className={`hidden shrink-0 sm:inline-flex ${statusChipClass(statusColor(p.status_id))}`}>
++                <span
++                  className={`hidden shrink-0 sm:inline-flex ${statusChipClass(statusColor(p.status_id))}`}
++                  style={statusChipStyle(statusColor(p.status_id))}
++                >
+                   {statusLabel(p.status_id)}
+                 </span>
+                 <span className="hidden shrink-0 font-mono text-xs text-muted-foreground md:inline">
+@@ -312,12 +350,18 @@
+         </ul>
+       ) : (
+         <div className={GRID_COLS[size]}>
+-          {properties!.map((p) => (
++          {filtered.map((p) => (
+             <div
+               key={p.id}
+               className="surface overflow-hidden transition-shadow hover:shadow-[var(--shadow-lift)]"
+             >
+-              <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="block">
++              <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="relative block">
++                <span
++                  className={`absolute left-2 top-2 z-10 ${statusChipClass(statusColor(p.status_id))}`}
++                  style={statusChipStyle(statusColor(p.status_id))}
++                >
++                  {statusLabel(p.status_id)}
++                </span>
+                 {p.photo_path ? (
+                   <SignedPhoto
+                     path={p.photo_path}
+@@ -333,10 +377,7 @@
+                   <p className="truncate font-display text-base font-semibold">{p.name}</p>
+                   <p className="mt-1 truncate text-xs text-muted-foreground">{p.address ?? "—"}</p>
+                   {size !== "sm" && (
+-                    <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+-                      <span className={statusChipClass(statusColor(p.status_id))}>
+-                        {statusLabel(p.status_id)}
+-                      </span>
++                    <div className="mt-3 flex items-center justify-end gap-2 text-xs">
+                       <span className="font-mono text-muted-foreground">{p.access_code}</span>
+                     </div>
+                   )}
+@@ -387,6 +428,7 @@
+                       className={`${statusChipClass(s.color)} ${
+                         edit.statusId === s.id ? "ring-2 ring-ring" : ""
+                       }`}
++                      style={statusChipStyle(s.color)}
+                     >
+                       {s.label}
+                     </button>
+--- a/src/routes/_authenticated/properties.$propertyId.tsx	2026-07-26 11:09:20.585765784 +0000
++++ b/src/routes/_authenticated/properties.$propertyId.tsx	2026-07-26 11:11:23.054645966 +0000
+@@ -18,7 +18,7 @@
+ import { useActiveGroup, useProfile } from "@/hooks/use-app";
+ import { useT } from "@/i18n";
+ import { supabase } from "@/integrations/supabase/client";
+-import { STATUS_COLORS, statusChipClass, statusDotClass } from "@/lib/status-colors";
++import { STATUS_COLORS, statusChipClass, statusDotClass, statusDotStyle, isHexColor } from "@/lib/status-colors";
+ 
+ export const Route = createFileRoute("/_authenticated/properties/$propertyId")({
+   head: () => ({
+@@ -384,6 +384,31 @@
+                       }`}
+                     />
+                   ))}
++                  <label
++                    className={`relative inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-full border border-border ${
++                      isHexColor(s.color) ? "ring-2 ring-ring" : ""
++                    }`}
++                    title="Custom colour"
++                    style={isHexColor(s.color) ? statusDotStyle(s.color) : undefined}
++                  >
++                    {!isHexColor(s.color) ? (
++                      <span
++                        aria-hidden="true"
++                        className="pointer-events-none absolute inset-0 rounded-full"
++                        style={{
++                          background:
++                            "conic-gradient(#ef4444,#f59e0b,#eab308,#22c55e,#06b6d4,#3b82f6,#8b5cf6,#ec4899,#ef4444)",
++                        }}
++                      />
++                    ) : null}
++                    <input
++                      type="color"
++                      className="h-6 w-6 cursor-pointer opacity-0"
++                      value={isHexColor(s.color) ? s.color! : "#3b82f6"}
++                      onChange={(e) => setStatusColor.mutate({ id: s.id, color: e.target.value })}
++                      aria-label="Custom colour"
++                    />
++                  </label>
+                   <Button
+                     variant="ghost"
+                     size="sm"
+--- a/src/routes/_authenticated/dashboard.tsx	2026-07-26 11:09:20.602714207 +0000
++++ b/src/routes/_authenticated/dashboard.tsx	2026-07-26 11:10:26.261395396 +0000
+@@ -325,7 +325,7 @@
+       title: task.title,
+       meta: `${t(TASK_STATUS_KEY[task.status] ?? "task.pending")} · ${shortDate(task.due_at ?? task.created_at)}`,
+     })),
+-  ];
++  ].slice(0, 8);
+ 
+   return (
+     <>
+@@ -396,7 +396,7 @@
+       title: request.description,
+       meta: `${request.status} · ${shortDate(request.created_at)}`,
+     })),
+-  ];
++  ].slice(0, 8);
+ 
+   return (
+     <>
+--- /dev/null	2026-07-26 11:06:57.669154923 +0000
++++ b/src/routes/_authenticated/history.tsx	2026-07-26 11:10:44.295495277 +0000
+@@ -0,0 +1,123 @@
++import { useQuery } from "@tanstack/react-query";
++import { createFileRoute, Link } from "@tanstack/react-router";
++import { ArrowLeft, CheckCircle2, ClipboardList } from "lucide-react";
++
++import { EmptyState, PageHeader } from "@/components/app-shell";
++import { useProfile } from "@/hooks/use-app";
++import { useT } from "@/i18n";
++import { supabase } from "@/integrations/supabase/client";
++
++export const Route = createFileRoute("/_authenticated/history")({
++  head: () => ({
++    meta: [
++      { title: "History — Keyward" },
++      { name: "description", content: "Every task and cleaning job you have completed." },
++      { property: "og:title", content: "History — Keyward" },
++      { property: "og:description", content: "Every task and cleaning job you have completed." },
++      { name: "robots", content: "noindex" },
++    ],
++  }),
++  component: HistoryPage,
++});
++
++function shortDate(value: string | null | undefined) {
++  if (!value) return "—";
++  const d = new Date(value);
++  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
++}
++
++function HistoryPage() {
++  const t = useT();
++  const { data: profile } = useProfile();
++  const userId = profile?.id ?? null;
++
++  const eventsQ = useQuery({
++    queryKey: ["history-completions", userId],
++    enabled: !!userId,
++    queryFn: async () => {
++      const { data, error } = await supabase
++        .from("task_completion_events")
++        .select("id, task_id, submitted_at")
++        .eq("user_id", userId!)
++        .order("submitted_at", { ascending: false })
++        .limit(500);
 +      if (error) throw error;
++      return data ?? [];
 +    },
-+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hr-affiliations", groupId] }),
-+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
 +  });
 +
-   const setSelfRole = useMutation({
-     mutationFn: async (value: string) => {
-       const { error } = await supabase
-@@ -245,6 +258,8 @@
-           count={counts.hr_company}
-           cap={CAPS.hr_company}
-           people={companies}
-+          onRemove={(userId) => removeCompany.mutate(userId)}
-+          removeMode="userId"
-           icon="shield"
-         />
-       </div>
-@@ -379,7 +394,8 @@
-           since: m.created_at,
-           groupName: g?.name ?? m.owner_group_id.slice(0, 8),
-           ownerName: o?.display_name || o?.username || "—",
--          ownerEmail: o?.email ?? "",
-+          // Workers/cleaners intentionally do not see their boss's email.
-+          ownerEmail: "",
-         };
-       });
-     },
-@@ -424,7 +440,6 @@
-                   <span className="block truncate text-sm font-medium">{h.groupName}</span>
-                   <span className="block truncate text-xs text-muted-foreground">
-                     {h.ownerName}
--                    {h.ownerEmail ? ` · ${h.ownerEmail}` : ""}
-                   </span>
-                 </span>
-                 <span className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">
-@@ -475,11 +490,13 @@
-   count: number;
-   cap: number;
-   people: Person[];
--  onRemove?: (membershipId: string) => void;
-+  onRemove?: (idOrUser: string) => void;
-+  removeMode?: "membership" | "userId";
-   icon?: "user" | "shield";
- }) {
-   const t = useT();
-   const Icon = icon === "shield" ? ShieldCheck : UserRound;
-+  const mode = removeMode ?? "membership";
-   return (
-     <section className="surface space-y-3 p-5">
-       <header className="flex items-baseline justify-between gap-2">
-@@ -501,13 +518,13 @@
-               <span className="block truncate text-sm font-medium">{p.name}</span>
-               <span className="block truncate text-xs text-muted-foreground">{p.sub}</span>
-             </span>
--            {onRemove && p.membershipId && (
-+            {onRemove && (mode === "userId" ? p.userId : p.membershipId) && (
-               <Button
-                 size="icon"
-                 variant="ghost"
-                 className="h-8 w-8 shrink-0"
-                 aria-label={t("people.removeMember")}
--                onClick={() => onRemove(p.membershipId!)}
-+                onClick={() => onRemove(mode === "userId" ? p.userId : p.membershipId!)}
-               >
-                 <X className="h-4 w-4" aria-hidden="true" />
-               </Button>
-diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/src/routes/_authenticated/tasks.tsx air/src/routes/_authenticated/tasks.tsx
---- air-orig/src/routes/_authenticated/tasks.tsx	2026-07-26 10:57:00.822718503 +0000
-+++ air/src/routes/_authenticated/tasks.tsx	2026-07-26 10:59:56.193156300 +0000
-@@ -255,6 +255,15 @@
-         <TaskDetailDialog
-           task={openTask}
-           assignee={nameOf(openTask.assigned_to_user_id)}
-+          isOwner={isOwner}
-+          onApprove={() => {
-+            setStatus.mutate({ id: openTask.id, status: "done" });
-+            setOpenId(null);
-+          }}
-+          onReopen={() => {
-+            setStatus.mutate({ id: openTask.id, status: "pending" });
-+            setOpenId(null);
-+          }}
-           onClose={() => setOpenId(null)}
-         />
-       )}
-@@ -545,16 +554,23 @@
- function TaskDetailDialog({
-   task,
-   assignee,
-+  isOwner,
-+  onApprove,
-+  onReopen,
-   onClose,
- }: {
-   task: {
-     id: string;
-     title: string;
-     description: string | null;
-+    status: TaskStatus;
-     cleaning_job_id: string | null;
-     proof_photo_path: string | null;
-   };
-   assignee: string;
-+  isOwner: boolean;
-+  onApprove: () => void;
-+  onReopen: () => void;
-   onClose: () => void;
- }) {
-   const t = useT();
-@@ -632,6 +648,21 @@
-             )}
-           </div>
-         </div>
-+        {isOwner && (task.status === "submitted" || task.status === "done") && (
-+          <DialogFooter>
-+            {task.status === "submitted" && (
-+              <Button onClick={onApprove}>
-+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-+                {t("task.approve")}
-+              </Button>
-+            )}
-+            {task.status === "done" && (
-+              <Button variant="outline" onClick={onReopen}>
-+                {t("task.reopen")}
-+              </Button>
-+            )}
-+          </DialogFooter>
-+        )}
-       </DialogContent>
-     </Dialog>
-   );
-diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/supabase/migrations/20260729000000_air_v4_completions_and_username.sql air/supabase/migrations/20260729000000_air_v4_completions_and_username.sql
---- air-orig/supabase/migrations/20260729000000_air_v4_completions_and_username.sql	1970-01-01 00:00:00.000000000 +0000
-+++ air/supabase/migrations/20260729000000_air_v4_completions_and_username.sql	2026-07-26 10:59:19.826767423 +0000
-@@ -0,0 +1,63 @@
-+-- Air v4:
-+--  * Reliable username -> email lookup for sign-in (reads auth.users, so it
-+--    still works when public.profiles.email is blank).
-+--  * Permanent record of task submissions so the "Finished jobs" counter on
-+--    a cleaner/worker dashboard does not fall when an owner reopens a task.
++  const taskIds = (eventsQ.data ?? []).map((e) => e.task_id);
++  const tasksQ = useQuery({
++    queryKey: ["history-tasks", taskIds.join(",")],
++    enabled: taskIds.length > 0,
++    queryFn: async () => {
++      const { data, error } = await supabase
++        .from("tasks")
++        .select("id, title, status, source")
++        .in("id", taskIds);
++      if (error) throw error;
++      return data ?? [];
++    },
++  });
 +
-+create or replace function public.email_for_username(p_username text)
-+returns text
++  const taskById = new Map((tasksQ.data ?? []).map((t) => [t.id, t]));
++  const events = eventsQ.data ?? [];
++  const total = events.length;
++
++  return (
++    <>
++      <Link
++        to="/dashboard"
++        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
++      >
++        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
++        {t("common.back")}
++      </Link>
++
++      <PageHeader
++        title={t("nav.history")}
++        description={`${total} ${total === 1 ? "completion" : "completions"}`}
++      />
++
++      {eventsQ.isLoading ? (
++        <div className="space-y-2">
++          {[0, 1, 2].map((i) => (
++            <div key={i} className="h-14 animate-pulse rounded-md bg-muted" />
++          ))}
++        </div>
++      ) : events.length === 0 ? (
++        <EmptyState />
++      ) : (
++        <ul className="surface divide-y divide-border">
++          {events.map((ev) => {
++            const task = taskById.get(ev.task_id);
++            const isCleaning = task?.source === "cleaning";
++            return (
++              <li key={ev.id} className="flex items-center gap-3 p-3">
++                <span
++                  className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
++                    isCleaning ? "bg-blue-500/10 text-blue-600" : "bg-emerald-500/10 text-emerald-600"
++                  }`}
++                >
++                  {isCleaning ? (
++                    <ClipboardList className="h-4 w-4" aria-hidden="true" />
++                  ) : (
++                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
++                  )}
++                </span>
++                <span className="min-w-0 flex-1">
++                  <span className="block truncate font-medium">
++                    {task?.title ?? t("common.unassigned")}
++                  </span>
++                  <span className="block truncate text-xs text-muted-foreground">
++                    {shortDate(ev.submitted_at)}
++                  </span>
++                </span>
++              </li>
++            );
++          })}
++        </ul>
++      )}
++    </>
++  );
++}
+--- /dev/null	2026-07-26 11:06:57.669154923 +0000
++++ b/src/routes/g.$code.tsx	2026-07-26 11:11:04.908185016 +0000
+@@ -0,0 +1,88 @@
++import { useQuery } from "@tanstack/react-query";
++import { createFileRoute, Link } from "@tanstack/react-router";
++import { MapPin } from "lucide-react";
++
++import { supabase } from "@/integrations/supabase/client";
++import { useT } from "@/i18n";
++
++export const Route = createFileRoute("/g/$code")({
++  ssr: false,
++  head: () => ({
++    meta: [
++      { title: "Welcome — Keyward" },
++      { name: "description", content: "Guest access page." },
++      { property: "og:title", content: "Welcome — Keyward" },
++      { property: "og:description", content: "Guest access page." },
++      { name: "robots", content: "noindex" },
++    ],
++  }),
++  component: GuestByCodePage,
++});
++
++type GuestProperty = {
++  id: string;
++  name: string;
++  address: string | null;
++  place_name: string | null;
++  photo_path: string | null;
++};
++
++function GuestByCodePage() {
++  const { code } = Route.useParams();
++  const t = useT();
++
++  const q = useQuery({
++    queryKey: ["guest-property", code],
++    queryFn: async () => {
++      const { data, error } = await supabase.rpc("guest_property_by_code", { _code: code });
++      if (error) throw error;
++      const row = Array.isArray(data) ? data[0] : data;
++      return (row ?? null) as GuestProperty | null;
++    },
++  });
++
++  const property = q.data ?? null;
++
++  return (
++    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-6 px-4 py-10">
++      <header className="text-center">
++        <h1 className="font-display text-3xl font-semibold">{t("guest.title")}</h1>
++        <p className="mt-1 text-sm text-muted-foreground">
++          {t("guest.codePrompt")}
++        </p>
++      </header>
++
++      {q.isLoading ? (
++        <div className="h-40 animate-pulse rounded-md bg-muted" />
++      ) : !property ? (
++        <div className="surface p-6 text-center">
++          <p className="font-medium">{t("guest.badCode")}</p>
++          <p className="mt-1 text-xs text-muted-foreground">
++            <span className="font-mono">{code}</span>
++          </p>
++          <Link
++            to="/"
++            className="mt-4 inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent"
++          >
++            {t("common.back")}
++          </Link>
++        </div>
++      ) : (
++        <section className="surface overflow-hidden">
++          <div className="flex h-40 w-full items-center justify-center bg-muted">
++            <MapPin className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
++          </div>
++          <div className="p-4">
++            <h2 className="font-display text-xl font-semibold">{property.name}</h2>
++            <p className="mt-1 text-sm text-muted-foreground">
++              {property.address ?? property.place_name ?? "—"}
++            </p>
++            <p className="mt-3 font-mono text-xs text-muted-foreground">
++              {code}
++            </p>
++          </div>
++        </section>
++      )}
++    </div>
++  );
++}
+--- /dev/null	2026-07-26 11:06:57.669154923 +0000
++++ b/supabase/migrations/20260730000000_air_v5_guest_and_status.sql	2026-07-26 11:10:54.673083315 +0000
+@@ -0,0 +1,25 @@
++-- Guest access: /g/{access_code} is a public shareable link. Anon has no
++-- SELECT on public.properties (rows contain owner-scoped data), so expose a
++-- narrow security-definer RPC returning only the fields the guest page needs.
++
++create or replace function public.guest_property_by_code(_code text)
++returns table (
++  id uuid,
++  name text,
++  address text,
++  place_name text,
++  photo_path text
++)
 +language sql
 +stable
 +security definer
 +set search_path = public
 +as $$
-+  select coalesce(u.email, p.email)
-+  from public.profiles p
-+  left join auth.users u on u.id = p.user_id
-+  where lower(p.username) = lower(trim(p_username))
-+     or lower(p.display_name) = lower(trim(p_username))
-+  order by (lower(p.username) = lower(trim(p_username))) desc
++  select p.id, p.name, p.address, p.place_name, p.photo_path
++  from public.properties p
++  where p.access_code = _code
 +  limit 1
 +$$;
 +
-+revoke all on function public.email_for_username(text) from public;
-+grant execute on function public.email_for_username(text) to anon, authenticated;
-+
-+-- Immutable audit of every submission. One row per submit, never deleted when
-+-- an owner reopens a task, so the counter can only ever go up.
-+create table if not exists public.task_completion_events (
-+  id uuid primary key default gen_random_uuid(),
-+  task_id uuid not null,
-+  user_id uuid not null,
-+  owner_group_id uuid,
-+  submitted_at timestamptz not null default now()
-+);
-+create index if not exists task_completion_events_user_idx
-+  on public.task_completion_events(user_id);
-+
-+grant select on public.task_completion_events to authenticated;
-+grant all on public.task_completion_events to service_role;
-+
-+alter table public.task_completion_events enable row level security;
-+
-+drop policy if exists "own completions readable" on public.task_completion_events;
-+create policy "own completions readable"
-+  on public.task_completion_events
-+  for select
-+  to authenticated
-+  using (user_id = auth.uid());
-+
-+create or replace function public.log_task_submission()
-+returns trigger language plpgsql security definer set search_path = public as $$
-+begin
-+  if NEW.status = 'submitted' and (OLD.status is distinct from 'submitted') then
-+    insert into public.task_completion_events(task_id, user_id, owner_group_id, submitted_at)
-+    values (NEW.id, coalesce(NEW.assigned_to_user_id, auth.uid()), NEW.owner_group_id, now());
-+  end if;
-+  return NEW;
-+end; $$;
-+
-+drop trigger if exists tasks_log_submission on public.tasks;
-+create trigger tasks_log_submission
-+  after update of status on public.tasks
-+  for each row execute function public.log_task_submission();
-\ No newline at end of file
++revoke all on function public.guest_property_by_code(text) from public;
++grant execute on function public.guest_property_by_code(text) to anon, authenticated;

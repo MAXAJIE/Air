@@ -18,7 +18,7 @@ import {
 import { useActiveGroup, useProfile } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
-import { STATUS_COLORS, statusChipClass, statusDotClass } from "@/lib/status-colors";
+import { STATUS_COLORS, statusChipClass, statusDotClass, statusDotStyle, isHexColor } from "@/lib/status-colors";
 
 export const Route = createFileRoute("/_authenticated/properties/$propertyId")({
   head: () => ({
@@ -359,6 +359,31 @@ function PropertyDetailView() {
                       }`}
                     />
                   ))}
+                  <label
+                    className={`relative inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-full border border-border ${
+                      isHexColor(s.color) ? "ring-2 ring-ring" : ""
+                    }`}
+                    title="Custom colour"
+                    style={isHexColor(s.color) ? statusDotStyle(s.color) : undefined}
+                  >
+                    {!isHexColor(s.color) ? (
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 rounded-full"
+                        style={{
+                          background:
+                            "conic-gradient(#ef4444,#f59e0b,#eab308,#22c55e,#06b6d4,#3b82f6,#8b5cf6,#ec4899,#ef4444)",
+                        }}
+                      />
+                    ) : null}
+                    <input
+                      type="color"
+                      className="h-6 w-6 cursor-pointer opacity-0"
+                      value={isHexColor(s.color) ? s.color! : "#3b82f6"}
+                      onChange={(e) => setStatusColor.mutate({ id: s.id, color: e.target.value })}
+                      aria-label="Custom colour"
+                    />
+                  </label>
                   <Button
                     variant="ghost"
                     size="sm"

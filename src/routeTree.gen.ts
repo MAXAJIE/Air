@@ -16,6 +16,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AuthenticatedAgenciesRouteImport } from './routes/_authenticated/agencies'
 import { Route as AuthenticatedCleaningRouteImport } from './routes/_authenticated/cleaning'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
 import { Route as AuthenticatedJobsRouteImport } from './routes/_authenticated/jobs'
 import { Route as AuthenticatedPeopleRouteImport } from './routes/_authenticated/people'
@@ -25,6 +26,7 @@ import { Route as AuthenticatedRequestsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedRosterRouteImport } from './routes/_authenticated/roster'
 import { Route as AuthenticatedShopRouteImport } from './routes/_authenticated/shop'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
+import { Route as GCodeRouteImport } from './routes/g.$code'
 import { Route as AuthenticatedOnboardingRoleRouteImport } from './routes/_authenticated/onboarding/role'
 import { Route as AuthenticatedPropertiesIndexRouteImport } from './routes/_authenticated/properties.index'
 import { Route as AuthenticatedPropertiesPropertyIdRouteImport } from './routes/_authenticated/properties.$propertyId'
@@ -61,6 +63,11 @@ const AuthenticatedCleaningRoute = AuthenticatedCleaningRouteImport.update({
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedHistoryRoute = AuthenticatedHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedInboxRoute = AuthenticatedInboxRouteImport.update({
@@ -109,6 +116,11 @@ const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const GCodeRoute = GCodeRouteImport.update({
+  id: '/g/$code',
+  path: '/g/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedOnboardingRoleRoute =
   AuthenticatedOnboardingRoleRouteImport.update({
     id: '/onboarding/role',
@@ -135,6 +147,7 @@ export interface FileRoutesByFullPath {
   '/agencies': typeof AuthenticatedAgenciesRoute
   '/cleaning': typeof AuthenticatedCleaningRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/history': typeof AuthenticatedHistoryRoute
   '/inbox': typeof AuthenticatedInboxRoute
   '/jobs': typeof AuthenticatedJobsRoute
   '/people': typeof AuthenticatedPeopleRoute
@@ -144,6 +157,7 @@ export interface FileRoutesByFullPath {
   '/roster': typeof AuthenticatedRosterRoute
   '/shop': typeof AuthenticatedShopRoute
   '/tasks': typeof AuthenticatedTasksRoute
+  '/g/$code': typeof GCodeRoute
   '/onboarding/role': typeof AuthenticatedOnboardingRoleRoute
   '/properties/$propertyId': typeof AuthenticatedPropertiesPropertyIdRoute
   '/properties/': typeof AuthenticatedPropertiesIndexRoute
@@ -155,6 +169,7 @@ export interface FileRoutesByTo {
   '/agencies': typeof AuthenticatedAgenciesRoute
   '/cleaning': typeof AuthenticatedCleaningRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/history': typeof AuthenticatedHistoryRoute
   '/inbox': typeof AuthenticatedInboxRoute
   '/jobs': typeof AuthenticatedJobsRoute
   '/people': typeof AuthenticatedPeopleRoute
@@ -164,6 +179,7 @@ export interface FileRoutesByTo {
   '/roster': typeof AuthenticatedRosterRoute
   '/shop': typeof AuthenticatedShopRoute
   '/tasks': typeof AuthenticatedTasksRoute
+  '/g/$code': typeof GCodeRoute
   '/onboarding/role': typeof AuthenticatedOnboardingRoleRoute
   '/properties/$propertyId': typeof AuthenticatedPropertiesPropertyIdRoute
   '/properties': typeof AuthenticatedPropertiesIndexRoute
@@ -177,6 +193,7 @@ export interface FileRoutesById {
   '/_authenticated/agencies': typeof AuthenticatedAgenciesRoute
   '/_authenticated/cleaning': typeof AuthenticatedCleaningRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/inbox': typeof AuthenticatedInboxRoute
   '/_authenticated/jobs': typeof AuthenticatedJobsRoute
   '/_authenticated/people': typeof AuthenticatedPeopleRoute
@@ -186,6 +203,7 @@ export interface FileRoutesById {
   '/_authenticated/roster': typeof AuthenticatedRosterRoute
   '/_authenticated/shop': typeof AuthenticatedShopRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
+  '/g/$code': typeof GCodeRoute
   '/_authenticated/onboarding/role': typeof AuthenticatedOnboardingRoleRoute
   '/_authenticated/properties/$propertyId': typeof AuthenticatedPropertiesPropertyIdRoute
   '/_authenticated/properties/': typeof AuthenticatedPropertiesIndexRoute
@@ -199,6 +217,7 @@ export interface FileRouteTypes {
     | '/agencies'
     | '/cleaning'
     | '/dashboard'
+    | '/history'
     | '/inbox'
     | '/jobs'
     | '/people'
@@ -208,6 +227,7 @@ export interface FileRouteTypes {
     | '/roster'
     | '/shop'
     | '/tasks'
+    | '/g/$code'
     | '/onboarding/role'
     | '/properties/$propertyId'
     | '/properties/'
@@ -219,6 +239,7 @@ export interface FileRouteTypes {
     | '/agencies'
     | '/cleaning'
     | '/dashboard'
+    | '/history'
     | '/inbox'
     | '/jobs'
     | '/people'
@@ -228,6 +249,7 @@ export interface FileRouteTypes {
     | '/roster'
     | '/shop'
     | '/tasks'
+    | '/g/$code'
     | '/onboarding/role'
     | '/properties/$propertyId'
     | '/properties'
@@ -240,6 +262,7 @@ export interface FileRouteTypes {
     | '/_authenticated/agencies'
     | '/_authenticated/cleaning'
     | '/_authenticated/dashboard'
+    | '/_authenticated/history'
     | '/_authenticated/inbox'
     | '/_authenticated/jobs'
     | '/_authenticated/people'
@@ -249,6 +272,7 @@ export interface FileRouteTypes {
     | '/_authenticated/roster'
     | '/_authenticated/shop'
     | '/_authenticated/tasks'
+    | '/g/$code'
     | '/_authenticated/onboarding/role'
     | '/_authenticated/properties/$propertyId'
     | '/_authenticated/properties/'
@@ -259,6 +283,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  GCodeRoute: typeof GCodeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -310,6 +335,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/history': {
+      id: '/_authenticated/history'
+      path: '/history'
+      fullPath: '/history'
+      preLoaderRoute: typeof AuthenticatedHistoryRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/inbox': {
@@ -375,6 +407,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTasksRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/g/$code': {
+      id: '/g/$code'
+      path: '/g/$code'
+      fullPath: '/g/$code'
+      preLoaderRoute: typeof GCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/onboarding/role': {
       id: '/_authenticated/onboarding/role'
       path: '/onboarding/role'
@@ -403,6 +442,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAgenciesRoute: typeof AuthenticatedAgenciesRoute
   AuthenticatedCleaningRoute: typeof AuthenticatedCleaningRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedHistoryRoute: typeof AuthenticatedHistoryRoute
   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
   AuthenticatedJobsRoute: typeof AuthenticatedJobsRoute
   AuthenticatedPeopleRoute: typeof AuthenticatedPeopleRoute
@@ -421,6 +461,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAgenciesRoute: AuthenticatedAgenciesRoute,
   AuthenticatedCleaningRoute: AuthenticatedCleaningRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedHistoryRoute: AuthenticatedHistoryRoute,
   AuthenticatedInboxRoute: AuthenticatedInboxRoute,
   AuthenticatedJobsRoute: AuthenticatedJobsRoute,
   AuthenticatedPeopleRoute: AuthenticatedPeopleRoute,
@@ -444,6 +485,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  GCodeRoute: GCodeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

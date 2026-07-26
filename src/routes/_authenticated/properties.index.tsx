@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ExternalLink, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { ExternalLink, Filter, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { AddressPicker, type PlaceValue } from "@/components/address-picker";
@@ -31,7 +31,14 @@ import { useActiveGroup } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { randomCode } from "@/lib/files";
-import { statusChipClass } from "@/lib/status-colors";
+import { statusChipClass, statusChipStyle } from "@/lib/status-colors";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export const Route = createFileRoute("/_authenticated/properties/")({
   head: () => ({
@@ -69,6 +76,8 @@ function PropertiesPage() {
   const [place, setPlace] = useState<PlaceValue>(EMPTY_PLACE);
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [edit, setEdit] = useState<EditState | null>(null);
+  // "" = All, "none" = Unassigned, else the status id
+  const [statusFilter, setStatusFilter] = useState<string>("");
 
   const setViewMode = (v: ViewMode) => {
     setView(v);
@@ -174,6 +183,13 @@ function PropertiesPage() {
 
   type PropertyRow = NonNullable<typeof properties>[number];
 
+  const filtered = useMemo<PropertyRow[]>(() => {
+    const rows = properties ?? [];
+    if (!statusFilter) return rows;
+    if (statusFilter === "none") return rows.filter((r) => !r.status_id);
+    return rows.filter((r) => r.status_id === statusFilter);
+  }, [properties, statusFilter]);
+
   const startEdit = (p: PropertyRow) =>
     setEdit({
       id: p.id,
@@ -235,6 +251,23 @@ function PropertiesPage() {
         title={t("prop.title")}
         action={
           <div className="flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-1 text-muted-foreground">
+              <Filter className="h-4 w-4" aria-hidden="true" />
+            </div>
+            <Select value={statusFilter || "__all"} onValueChange={(v) => setStatusFilter(v === "__all" ? "" : v)}>
+              <SelectTrigger className="h-8 w-[9rem]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all">All</SelectItem>
+                <SelectItem value="none">{t("common.unassigned")}</SelectItem>
+                {(statuses ?? []).map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <ViewToggle view={view} onView={setViewMode} size={size} onSize={setCardSize} />
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
@@ -279,9 +312,11 @@ function PropertiesPage() {
         </div>
       ) : (properties ?? []).length === 0 ? (
         <EmptyState />
+      ) : filtered.length === 0 ? (
+        <EmptyState />
       ) : view === "list" ? (
         <ul className="surface divide-y divide-border">
-          {properties!.map((p) => (
+          {filtered.map((p) => (
             <li key={p.id} className="flex items-center gap-1 pr-2 transition-colors hover:bg-accent">
               <Link
                 to="/properties/$propertyId"
@@ -299,7 +334,10 @@ function PropertiesPage() {
                   <span className="block truncate font-medium">{p.name}</span>
                   <span className="block truncate text-xs text-muted-foreground">{p.address ?? "—"}</span>
                 </span>
-                <span className={`hidden shrink-0 sm:inline-flex ${statusChipClass(statusColor(p.status_id))}`}>
+                <span
+                  className={`hidden shrink-0 sm:inline-flex ${statusChipClass(statusColor(p.status_id))}`}
+                  style={statusChipStyle(statusColor(p.status_id))}
+                >
                   {statusLabel(p.status_id)}
                 </span>
                 <span className="hidden shrink-0 font-mono text-xs text-muted-foreground md:inline">
@@ -312,12 +350,18 @@ function PropertiesPage() {
         </ul>
       ) : (
         <div className={GRID_COLS[size]}>
-          {properties!.map((p) => (
+          {filtered.map((p) => (
             <div
               key={p.id}
               className="surface overflow-hidden transition-shadow hover:shadow-[var(--shadow-lift)]"
             >
-              <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="block">
+              <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="relative block">
+                <span
+                  className={`absolute left-2 top-2 z-10 ${statusChipClass(statusColor(p.status_id))}`}
+                  style={statusChipStyle(statusColor(p.status_id))}
+                >
+                  {statusLabel(p.status_id)}
+                </span>
                 {p.photo_path ? (
                   <SignedPhoto
                     path={p.photo_path}
@@ -333,10 +377,7 @@ function PropertiesPage() {
                   <p className="truncate font-display text-base font-semibold">{p.name}</p>
                   <p className="mt-1 truncate text-xs text-muted-foreground">{p.address ?? "—"}</p>
                   {size !== "sm" && (
-                    <div className="mt-3 flex items-center justify-between gap-2 text-xs">
-                      <span className={statusChipClass(statusColor(p.status_id))}>
-                        {statusLabel(p.status_id)}
-                      </span>
+                    <div className="mt-3 flex items-center justify-end gap-2 text-xs">
                       <span className="font-mono text-muted-foreground">{p.access_code}</span>
                     </div>
                   )}
@@ -387,6 +428,7 @@ function PropertiesPage() {
                       className={`${statusChipClass(s.color)} ${
                         edit.statusId === s.id ? "ring-2 ring-ring" : ""
                       }`}
+                      style={statusChipStyle(s.color)}
                     >
                       {s.label}
                     </button>
