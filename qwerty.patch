@@ -1,212 +1,57 @@
---- /dev/null
-+++ b/supabase/migrations/20260728000000_air_v3_invites_and_kick.sql
-@@ -0,0 +1,89 @@
-+-- Air v3: single-use invites, no HR pilot cap, and richer property-status CRUD hooks.
-+--
-+-- Behaviour changes:
-+--  * redeem_invite_code / redeem_hr_invite_code now revoke the code after a
-+--    successful redemption (single-use). The People page filters codes by
-+--    revoked_at IS NULL, so used codes disappear on their own — no extra UI.
-+--  * The "pilot" cap that blocked a cleaning company from joining a second
-+--    owner (or re-joining after leaving) is removed; joining an owner group is
-+--    now genuinely optional.
-+--  * kick_hr_company lets the owner remove a cleaning company from their
-+--    group the same way workers/cleaners are removed.
-+
-+CREATE OR REPLACE FUNCTION public.redeem_invite_code(p_code text)
-+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-+DECLARE
-+  v_uid uuid := auth.uid();
-+  v_role public.app_role;
-+  v_invite public.invite_codes%ROWTYPE;
-+  v_count int;
-+BEGIN
-+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
-+  SELECT primary_role INTO v_role FROM public.profiles WHERE user_id = v_uid;
-+  IF v_role IS NULL THEN RAISE EXCEPTION 'Pick your role first'; END IF;
-+
-+  SELECT * INTO v_invite FROM public.invite_codes
-+   WHERE upper(code) = upper(trim(p_code)) AND active = true AND revoked_at IS NULL
-+   FOR UPDATE;
-+  IF v_invite.id IS NULL THEN RAISE EXCEPTION 'Invalid or revoked invite code'; END IF;
-+  IF v_invite.role <> v_role THEN RAISE EXCEPTION 'This code is not for your role'; END IF;
-+
-+  IF v_role = 'hr_company' THEN
-+    -- Cleaning companies can join any number of owner groups now.
-+    INSERT INTO public.hr_affiliations(owner_group_id, hr_company_user_id)
-+    VALUES (v_invite.owner_group_id, v_uid)
-+    ON CONFLICT (owner_group_id, hr_company_user_id) DO UPDATE SET status='active';
-+  ELSE
-+    SELECT count(*) INTO v_count FROM public.memberships
-+      WHERE owner_group_id = v_invite.owner_group_id AND role = v_role::text::public.membership_role
-+        AND status='active' AND user_id <> v_uid;
-+    IF (v_role = 'cleaner' AND v_count >= 3) OR (v_role = 'worker' AND v_count >= 2) THEN
-+      RAISE EXCEPTION 'This group has reached its pilot team limit for your role';
-+    END IF;
-+    INSERT INTO public.memberships(user_id, owner_group_id, role, joined_via_invite_code_id)
-+    VALUES (v_uid, v_invite.owner_group_id, v_role::text::public.membership_role, v_invite.id)
-+    ON CONFLICT (user_id, owner_group_id, role) DO UPDATE SET status='active';
-+  END IF;
-+
-+  -- Single-use: once someone successfully joins, the code cannot be reused.
-+  UPDATE public.invite_codes
-+     SET active = false, revoked_at = now()
-+   WHERE id = v_invite.id;
-+
-+  RETURN jsonb_build_object('owner_group_id', v_invite.owner_group_id, 'role', v_role);
-+END; $$;
-+
-+CREATE OR REPLACE FUNCTION public.redeem_hr_invite_code(p_code text)
-+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-+DECLARE
-+  v_uid uuid := auth.uid();
-+  v_role public.app_role;
-+  v_invite public.hr_invite_codes%ROWTYPE;
-+BEGIN
-+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
-+  SELECT primary_role INTO v_role FROM public.profiles WHERE user_id = v_uid;
-+  IF v_role IS DISTINCT FROM 'cleaner' THEN RAISE EXCEPTION 'Only cleaners can join an HR company roster'; END IF;
-+  SELECT * INTO v_invite FROM public.hr_invite_codes
-+   WHERE upper(code) = upper(trim(p_code)) AND active = true AND revoked_at IS NULL
-+   FOR UPDATE;
-+  IF v_invite.id IS NULL THEN RAISE EXCEPTION 'Invalid or revoked invite code'; END IF;
-+  INSERT INTO public.hr_company_roster(hr_company_user_id, cleaner_user_id)
-+  VALUES (v_invite.hr_company_user_id, v_uid)
-+  ON CONFLICT (hr_company_user_id, cleaner_user_id) DO UPDATE SET status='active';
-+  UPDATE public.hr_invite_codes SET active = false, revoked_at = now() WHERE id = v_invite.id;
-+  RETURN jsonb_build_object('hr_company_user_id', v_invite.hr_company_user_id);
-+END; $$;
-+
-+-- Owner can kick a cleaning company from their group.
-+CREATE OR REPLACE FUNCTION public.kick_hr_company(p_group_id uuid, p_hr_user_id uuid)
-+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-+BEGIN
-+  IF NOT public.is_group_owner(auth.uid(), p_group_id) THEN
-+    RAISE EXCEPTION 'Only the owner can remove cleaning companies';
-+  END IF;
-+  UPDATE public.hr_affiliations
-+     SET status = 'revoked'
-+   WHERE owner_group_id = p_group_id
-+     AND hr_company_user_id = p_hr_user_id;
-+END; $$;
-+GRANT EXECUTE ON FUNCTION public.kick_hr_company(uuid, uuid) TO authenticated;
---- a/src/routes/_authenticated/dashboard.tsx	2026-07-26 10:12:37.357217341 +0000
-+++ b/src/routes/_authenticated/dashboard.tsx	2026-07-26 10:13:29.362830042 +0000
-@@ -20,6 +20,23 @@
- import { useT, type TranslationKey } from "@/i18n";
- import { supabase } from "@/integrations/supabase/client";
- 
-+
-+// Total tasks (all statuses) across the group — displayed alongside the other stats.
-+function useTotalTasksCount(groupId: string | null | undefined) {
-+    return useQuery({
-+        queryKey: ["dash-total-tasks", groupId],
-+        enabled: !!groupId,
-+        queryFn: async () => {
-+            const { count, error } = await supabase
-+                .from("tasks")
-+                .select("id", { count: "exact", head: true })
-+                .eq("owner_group_id", groupId!);
-+            if (error) throw error;
-+            return count ?? 0;
-+        },
-+    });
-+}
-+
- export const Route = createFileRoute("/_authenticated/dashboard")({
-   head: () => ({
-     meta: [
---- a/src/routes/_authenticated/people.tsx	2026-07-26 10:12:37.357865195 +0000
-+++ b/src/routes/_authenticated/people.tsx	2026-07-26 10:13:29.406778748 +0000
-@@ -523,3 +523,14 @@
-     </section>
-   );
- }
-+
-+// Owner-only: remove a cleaning company from the group. UI callers wire this
-+// to the same "Remove" affordance used for workers/cleaners.
-+async function kickHrCompany(groupId: string, hrUserId: string) {
-+    const { error } = await supabase.rpc("kick_hr_company", {
-+        p_group_id: groupId,
-+        p_hr_user_id: hrUserId,
-+    });
-+    if (error) throw error;
-+}
-+export { kickHrCompany };
---- a/src/routes/_authenticated/properties.$propertyId.tsx	2026-07-26 10:12:37.358283600 +0000
-+++ b/src/routes/_authenticated/properties.$propertyId.tsx	2026-07-26 10:13:29.460240461 +0000
-@@ -1,6 +1,6 @@
- import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
- import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
--import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
-+import { ArrowLeft, Trash2, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
- import { useState } from "react";
- import { toast } from "sonner";
- 
-@@ -158,6 +158,31 @@
-     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+diff --git a/src/routes/_authenticated/dashboard.tsx b/src/routes/_authenticated/dashboard.tsx
+--- a/src/routes/_authenticated/dashboard.tsx
++++ b/src/routes/_authenticated/dashboard.tsx
+@@ -296,45 +296,47 @@
+     },
    });
  
-+  const renameStatus = useMutation({
-+    mutationFn: async (values: { id: string; label: string }) => {
-+      const { error } = await supabase
-+        .from("property_statuses")
-+        .update({ label: values.label })
-+        .eq("id", values.id);
-+      if (error) throw error;
-+    },
-+    onSuccess: async () => {
-+      await qc.invalidateQueries({ queryKey: ["property-statuses", groupId] });
-+    },
-+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
-+  });
-+
-+  const deleteStatus = useMutation({
-+    mutationFn: async (id: string) => {
-+      const { error } = await supabase.from("property_statuses").delete().eq("id", id);
-+      if (error) throw error;
-+    },
-+    onSuccess: async () => {
-+      await qc.invalidateQueries({ queryKey: ["property-statuses", groupId] });
-+    },
-+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
-+  });
-+
-   const removeProperty = useMutation({
-     mutationFn: async () => {
-       const { error } = await supabase.from("properties").delete().eq("id", propertyId);
-@@ -312,8 +337,15 @@
+   const jobs = data?.jobs ?? [];
+   const tasks = data?.tasks ?? [];
++  // Job to do / running / finished are driven off `tasks` so the numbers match
++  // the Tasks page (cleaning_jobs counts under-reported the real workload).
++  const todo = tasks.filter((t) => t.status === "pending").length;
++  const running = tasks.filter((t) => t.status === "in_progress").length;
++  const finished = tasks.filter(
++    (t) => t.status === "submitted" || t.status === "done" || t.status === "reviewed",
++  ).length;
+-  const todo = jobs.filter((j) => j.status === "pending").length;
+-  const running = jobs.filter((j) => j.status === "in_progress").length;
+-  const finished = jobs.filter((j) => j.status === "submitted" || j.status === "reviewed").length;
+-  const openTasks = tasks.filter((task) => task.status !== "done").length;
  
-           <ul className="space-y-2">
-             {(statusesQ.data ?? []).map((s) => (
--              <li key={s.id} className="flex items-center justify-between gap-2">
--                <span className={statusChipClass(s.color)}>{s.label}</span>
-+              <li key={s.id} className="flex flex-wrap items-center justify-between gap-2">
-+                <Input
-+                  defaultValue={s.label}
-+                  className="h-8 max-w-[10rem]"
-+                  onBlur={(e) => {
-+                    const v = e.currentTarget.value.trim();
-+                    if (v && v !== s.label) renameStatus.mutate({ id: s.id, label: v });
-+                  }}
-+                />
-                 <span className="flex items-center gap-1">
-                   {STATUS_COLORS.map((c) => (
-                     <button
-@@ -327,6 +359,16 @@
-                       }`}
-                     />
-                   ))}
-+                  <Button
-+                    variant="ghost"
-+                    size="sm"
-+                    aria-label={t("common.delete")}
-+                    onClick={() => {
-+                      if (window.confirm(t("task.deleteConfirm"))) deleteStatus.mutate(s.id);
-+                    }}
-+                  >
-+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
-+                  </Button>
-                 </span>
-               </li>
-             ))}
+   const buckets: Bucket[] = (["pending", "in_progress", "submitted", "reviewed"] as const)
+     .map((status) => ({
+       name: t(`clean.status.${status}` as TranslationKey),
+       value: jobs.filter((j) => j.status === status).length,
+     }))
+     .filter((bucket) => bucket.value > 0);
+ 
+   // Cleaners see their own work only — never a property record they can open.
+   const activity: ActivityRow[] = [
+     ...jobs.slice(0, 6).map((job) => ({
+       id: `job-${job.id}`,
+       title: t("dash.jobEntry"),
+       meta: `${t(`clean.status.${job.status}` as TranslationKey)} · ${shortDate(job.scheduled_at ?? job.created_at)}`,
+     })),
+     ...tasks.slice(0, 6).map((task) => ({
+       id: `task-${task.id}`,
+       title: task.title,
+       meta: `${t(TASK_STATUS_KEY[task.status] ?? "task.pending")} · ${shortDate(task.due_at ?? task.created_at)}`,
+     })),
+   ];
+ 
+   return (
+     <>
+-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
++      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+         <StatCard label={t("dash.jobsToDo")} value={todo} icon={ClipboardList} />
+         <StatCard label={t("dash.jobsRunning")} value={running} icon={Sparkle} />
+         <StatCard label={t("dash.jobsDone")} value={finished} icon={CheckCircle2} />
+-        <StatCard label={t("dash.myTasks")} value={openTasks} icon={ListChecks} />
+       </div>
+       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+         <CountBars title={t("dash.myJobLoad")} data={buckets} />
+         <ActivityList rows={activity} />
+       </div>
+     </>
+   );

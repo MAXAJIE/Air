@@ -298,10 +298,13 @@ function CleanerDashboard() {
 
   const jobs = data?.jobs ?? [];
   const tasks = data?.tasks ?? [];
-  const todo = jobs.filter((j) => j.status === "pending").length;
-  const running = jobs.filter((j) => j.status === "in_progress").length;
-  const finished = jobs.filter((j) => j.status === "submitted" || j.status === "reviewed").length;
-  const openTasks = tasks.filter((task) => task.status !== "done").length;
+  // Job to do / running / finished are driven off `tasks` so the numbers match
+  // the Tasks page (cleaning_jobs counts under-reported the real workload).
+  const todo = tasks.filter((t) => t.status === "pending").length;
+  const running = tasks.filter((t) => t.status === "in_progress").length;
+  const finished = tasks.filter(
+    (t) => t.status === "submitted" || t.status === "done" || t.status === "reviewed",
+  ).length;
 
   const buckets: Bucket[] = (["pending", "in_progress", "submitted", "reviewed"] as const)
     .map((status) => ({
@@ -326,11 +329,10 @@ function CleanerDashboard() {
 
   return (
     <>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard label={t("dash.jobsToDo")} value={todo} icon={ClipboardList} />
         <StatCard label={t("dash.jobsRunning")} value={running} icon={Sparkle} />
         <StatCard label={t("dash.jobsDone")} value={finished} icon={CheckCircle2} />
-        <StatCard label={t("dash.myTasks")} value={openTasks} icon={ListChecks} />
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
         <CountBars title={t("dash.myJobLoad")} data={buckets} />
