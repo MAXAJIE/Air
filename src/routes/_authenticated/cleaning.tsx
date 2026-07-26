@@ -28,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useActiveGroup } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/cleaning")({
   head: () => ({
@@ -292,6 +293,178 @@ type DraftItem = { key: string; description: string; notes: string; requires_pho
 
 function TemplatesPanel() {
   const t = useT();
+  const [kind, setKind] = useState<"cleaning" | "amenity">("cleaning");
+
+  return (
+    <div className="space-y-4">
+      <div className="inline-flex rounded-xl border border-border bg-muted/40 p-1">
+        <button
+          type="button"
+          onClick={() => setKind("cleaning")}
+          className={cn(
+            "rounded-lg px-3 py-1.5 text-sm transition-colors",
+            kind === "cleaning" ? "bg-background shadow-sm" : "text-muted-foreground",
+          )}
+        >
+          {t("tpl.kindCleaning")}
+        </button>
+        <button
+          type="button"
+          onClick={() => setKind("amenity")}
+          className={cn(
+            "rounded-lg px-3 py-1.5 text-sm transition-colors",
+            kind === "amenity" ? "bg-background shadow-sm" : "text-muted-foreground",
+          )}
+        >
+          {t("tpl.kindAmenity")}
+        </button>
+      </div>
+      {kind === "cleaning" ? <CleaningTemplatesPanel /> : <AmenityChecklistPanel />}
+    </div>
+  );
+}
+
+/** Amenity baselines, grouped per property — the counting half of a checklist. */
+function AmenityChecklistPanel() {
+  const t = useT();
+  const qc = useQueryClient();
+  const { groupId } = useActiveGroup();
+  const [propertyId, setPropertyId] = useState<string>("");
+  const [name, setName] = useState("");
+  const [qty, setQty] = useState("1");
+
+  const propsQ = useQuery({
+    queryKey: ["properties", groupId],
+    enabled: !!groupId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("properties")
+        .select("id, name")
+        .eq("owner_group_id", groupId!)
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const selected = propertyId || propsQ.data?.[0]?.id || "";
+
+  const amenitiesQ = useQuery({
+    queryKey: ["amenities", selected],
+    enabled: !!selected,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("amenity_definitions")
+        .select("id, name, expected_qty")
+        .eq("property_id", selected)
+        .order("name");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const add = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("amenity_definitions").insert({
+        property_id: selected,
+        name: name.trim(),
+        expected_qty: Number(qty) || 0,
+      });
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["amenities", selected] });
+      setName("");
+      setQty("1");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("amenity_definitions").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["amenities", selected] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  return (
+    <section className="surface space-y-4 p-5">
+      <div>
+        <h2 className="text-lg">{t("tpl.amenityTitle")}</h2>
+        <p className="text-sm text-muted-foreground">{t("tpl.amenityHelp")}</p>
+      </div>
+
+      <div className="grid gap-2 sm:max-w-xs">
+        <Label htmlFor="amenity-property">{t("clean.property")}</Label>
+        <Select value={selected} onValueChange={setPropertyId}>
+          <SelectTrigger id="amenity-property">
+            <SelectValue placeholder={t("clean.property")} />
+          </SelectTrigger>
+          <SelectContent>
+            {(propsQ.data ?? []).map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {selected ? (
+        <>
+          <div className="grid grid-cols-[minmax(0,1fr)_6rem_auto] gap-2">
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t("prop.amenityName")}
+            />
+            <Input
+              type="number"
+              min={0}
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              aria-label={t("prop.expected")}
+            />
+            <Button disabled={!name.trim() || add.isPending} onClick={() => add.mutate()}>
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              {t("prop.addAmenity")}
+            </Button>
+          </div>
+          <ul className="divide-y divide-border text-sm">
+            {(amenitiesQ.data ?? []).map((a) => (
+              <li key={a.id} className="flex items-center justify-between gap-3 py-2.5">
+                <span className="min-w-0 truncate">{a.name}</span>
+                <span className="flex shrink-0 items-center gap-3">
+                  <span className="text-muted-foreground">
+                    {t("prop.expected")}: {a.expected_qty}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={t("common.delete")}
+                    onClick={() => remove.mutate(a.id)}
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </span>
+              </li>
+            ))}
+            {(amenitiesQ.data ?? []).length === 0 && (
+              <li className="py-6 text-center text-muted-foreground">{t("common.none")}</li>
+            )}
+          </ul>
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">{t("common.none")}</p>
+      )}
+    </section>
+  );
+}
+
+function CleaningTemplatesPanel() {
+  const t = useT();
   const qc = useQueryClient();
   const { groupId } = useActiveGroup();
   const [editing, setEditing] = useState<{ id: string | null } | null>(null);
@@ -329,6 +502,7 @@ function TemplatesPanel() {
           {t("tpl.new")}
         </Button>
       </div>
+
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(templatesQ.data ?? []).map((tpl) => (

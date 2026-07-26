@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Copy, Plus, ShieldCheck, UserRound, X } from "lucide-react";
+import { Building2, Copy, Plus, ShieldCheck, UserRound, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -46,26 +48,57 @@ type Person = {
   sub: string;
 };
 
+type PersonRow = Person & { role: "owner" | "cleaner" | "worker" };
+
 function PeoplePage() {
+  const { data: profile } = useProfile();
+  if (profile && profile.primary_role !== "owner") return <MemberPeople />;
+  return <OwnerPeople />;
+}
+
+/* --------------------------- owner: team roster --------------------------- */
+
+function OwnerPeople() {
   const t = useT();
   const qc = useQueryClient();
   const { groupId } = useActiveGroup();
   const { data: profile } = useProfile();
   const [role, setRole] = useState<InviteRole>("cleaner");
 
+  // Memberships and profiles are fetched separately: there is no foreign key
+  // between them, so a PostgREST embed fails and the roster would render empty.
   const membersQ = useQuery({
     queryKey: ["members", groupId],
     enabled: !!groupId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("memberships")
-        .select(
-          "id, role, status, user_id, profiles:profiles!memberships_user_id_fkey(display_name, username, email)",
-        )
+        .select("id, role, status, user_id")
         .eq("owner_group_id", groupId!)
         .eq("status", "active");
       if (error) throw error;
-      return data;
+      if (!data?.length) return [] as PersonRow[];
+
+      const { data: profiles, error: profileError } = await supabase
+        .from("profiles")
+        .select("user_id, display_name, username, email")
+        .in(
+          "user_id",
+          data.map((m) => m.user_id),
+        );
+      if (profileError) throw profileError;
+
+      return data.map<PersonRow>((m) => {
+        const p = profiles?.find((row) => row.user_id === m.user_id);
+        return {
+          key: m.id,
+          membershipId: m.id,
+          userId: m.user_id,
+          role: m.role,
+          name: p?.display_name || p?.username || m.user_id.slice(0, 8),
+          sub: p?.email ?? "",
+        };
+      });
     },
   });
 
@@ -162,23 +195,11 @@ function PeoplePage() {
       await qc.invalidateQueries({ queryKey: ["profile"] });
       toast.success(t("common.saved"));
     },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
   });
 
   const byRole = (want: "cleaner" | "worker"): Person[] =>
-    (membersQ.data ?? [])
-      .filter((m) => m.role === want)
-      .map((m) => {
-        const p = m.profiles as unknown as
-          | { display_name: string | null; username: string; email: string }
-          | null;
-        return {
-          key: m.id,
-          membershipId: m.id,
-          userId: m.user_id,
-          name: p?.display_name || p?.username || m.user_id.slice(0, 8),
-          sub: p?.email ?? "",
-        };
-      });
+    (membersQ.data ?? []).filter((m) => m.role === want);
 
   const companies: Person[] = (hrQ.data ?? []).map((h) => ({
     key: h.id,
@@ -197,6 +218,12 @@ function PeoplePage() {
   return (
     <>
       <PageHeader title={t("people.title")} />
+
+      {membersQ.isError && (
+        <p className="mb-4 text-sm text-destructive">
+          {membersQ.error instanceof Error ? membersQ.error.message : t("common.error")}
+        </p>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <RoleColumn
@@ -301,6 +328,135 @@ function PeoplePage() {
               <SelectItem value="worker">{t("role.worker")}</SelectItem>
             </SelectContent>
           </Select>
+        </section>
+      </div>
+    </>
+  );
+}
+
+/* ------------------- cleaner / worker: who hired me ------------------- */
+
+function MemberPeople() {
+  const t = useT();
+  const qc = useQueryClient();
+  const { data: profile } = useProfile();
+  const [code, setCode] = useState("");
+
+  const hiresQ = useQuery({
+    queryKey: ["my-hires", profile?.user_id],
+    enabled: !!profile?.user_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("memberships")
+        .select("id, role, created_at, owner_group_id")
+        .eq("user_id", profile!.user_id)
+        .eq("status", "active");
+      if (error) throw error;
+      if (!data?.length) return [];
+
+      const { data: groups, error: groupError } = await supabase
+        .from("owner_groups")
+        .select("id, name, owner_user_id")
+        .in(
+          "id",
+          data.map((m) => m.owner_group_id),
+        );
+      if (groupError) throw groupError;
+
+      const ownerIds = Array.from(new Set((groups ?? []).map((g) => g.owner_user_id)));
+      const ownersRes = await supabase
+        .from("profiles")
+        .select("user_id, display_name, username, email")
+        .in("user_id", ownerIds.length ? ownerIds : ["00000000-0000-0000-0000-000000000000"]);
+      const owners = ownersRes.data;
+
+      return data.map((m) => {
+        const g = groups?.find((row) => row.id === m.owner_group_id);
+        const o = owners?.find((row) => row.user_id === g?.owner_user_id);
+        return {
+          id: m.id,
+          role: m.role,
+          since: m.created_at,
+          groupName: g?.name ?? m.owner_group_id.slice(0, 8),
+          ownerName: o?.display_name || o?.username || "—",
+          ownerEmail: o?.email ?? "",
+        };
+      });
+    },
+  });
+
+  const join = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc("redeem_invite_code", { p_code: code.trim() });
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      setCode("");
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["my-groups"] }),
+        qc.invalidateQueries({ queryKey: ["my-hires"] }),
+      ]);
+      toast.success(t("join.joined"));
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  return (
+    <>
+      <PageHeader title={t("people.myHires")} />
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+        <section className="surface space-y-3 p-5">
+          <div>
+            <h2 className="text-lg">{t("people.myHires")}</h2>
+            <p className="text-sm text-muted-foreground">{t("people.myHiresHelp")}</p>
+          </div>
+          <ul className="space-y-2">
+            {(hiresQ.data ?? []).map((h) => (
+              <li
+                key={h.id}
+                className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground">
+                  <Building2 className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{h.groupName}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {h.ownerName}
+                    {h.ownerEmail ? ` · ${h.ownerEmail}` : ""}
+                  </span>
+                </span>
+                <span className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">
+                  {t(`role.${h.role as "cleaner" | "worker"}`)}
+                </span>
+              </li>
+            ))}
+            {(hiresQ.data ?? []).length === 0 && (
+              <li className="rounded-lg border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+                {t("people.noHires")}
+              </li>
+            )}
+          </ul>
+        </section>
+
+        <section className="surface space-y-3 p-5">
+          <div>
+            <h2 className="text-lg">{t("people.joinAnother")}</h2>
+            <p className="text-sm text-muted-foreground">{t("people.joinAnotherHelp")}</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="join-code">{t("join.code")}</Label>
+            <Input
+              id="join-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              className="font-mono uppercase"
+            />
+          </div>
+          <Button disabled={!code.trim() || join.isPending} onClick={() => join.mutate()}>
+            {t("join.join")}
+          </Button>
         </section>
       </div>
     </>

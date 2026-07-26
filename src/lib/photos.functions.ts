@@ -22,10 +22,11 @@ export const uploadPhoto = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => uploadInput.parse(input))
   .handler(async ({ data, context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const ext = data.fileName.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     const path = `${data.folder}/${context.userId}/${crypto.randomUUID()}.${ext}`;
-    const { error } = await supabaseAdmin.storage
+    // Uploads run as the signed-in user (storage RLS restricts them to their own
+    // folder), so no service-role key is needed for this flow.
+    const { error } = await context.supabase.storage
       .from("photos")
       .upload(path, decode(data.dataBase64), { contentType: data.contentType, upsert: false });
     if (error) throw new Error(error.message);
@@ -36,10 +37,9 @@ export const uploadPhoto = createServerFn({ method: "POST" })
 export const signPhotos = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => z.object({ paths: z.array(z.string().min(1)).max(60) }).parse(input))
-  .handler(async ({ data }) => {
+  .handler(async ({ data, context }) => {
     if (data.paths.length === 0) return { urls: {} as Record<string, string> };
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: signed, error } = await supabaseAdmin.storage
+    const { data: signed, error } = await context.supabase.storage
       .from("photos")
       .createSignedUrls(data.paths, 60 * 60);
     if (error) throw new Error(error.message);

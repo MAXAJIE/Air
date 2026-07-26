@@ -668,8 +668,10 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_path: string | null
           created_at: string
           display_name: string | null
+          display_name_updated_at: string | null
           email: string
           locale: string
           primary_role: Database["public"]["Enums"]["app_role"] | null
@@ -680,8 +682,10 @@ export type Database = {
           username: string
         }
         Insert: {
+          avatar_path?: string | null
           created_at?: string
           display_name?: string | null
+          display_name_updated_at?: string | null
           email: string
           locale?: string
           primary_role?: Database["public"]["Enums"]["app_role"] | null
@@ -692,8 +696,10 @@ export type Database = {
           username: string
         }
         Update: {
+          avatar_path?: string | null
           created_at?: string
           display_name?: string | null
+          display_name_updated_at?: string | null
           email?: string
           locale?: string
           primary_role?: Database["public"]["Enums"]["app_role"] | null

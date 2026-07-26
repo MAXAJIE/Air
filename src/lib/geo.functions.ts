@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
@@ -130,4 +131,50 @@ export const reverseGeocode = createServerFn({ method: "POST" })
         lng: data.lng,
       },
     };
+  });
+
+/**
+ * Coarse, IP-based location used when the browser refuses GPS (denied permission,
+ * blocked in an embedded frame, or no GPS hardware). Keeps "use my location" usable.
+ */
+export const approximateLocation = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(
+  async (): Promise<{ result: GeoResult | null }> => {
+    const request = getRequest();
+    const clientIp =
+      request.headers.get("cf-connecting-ip") ??
+      request.headers.get("x-real-ip") ??
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+      null;
+
+    const url = clientIp ? `https://ipapi.co/${clientIp}/json/` : "https://ipapi.co/json/";
+    try {
+      const response = await fetch(url, { headers: { "User-Agent": "keyward-app/1.0 (ip locate)" } });
+      if (!response.ok) return { result: null };
+      const json = (await response.json()) as {
+        latitude?: number;
+        longitude?: number;
+        city?: string;
+        region?: string;
+        country_name?: string;
+        error?: boolean;
+      };
+      if (json.error || typeof json.latitude !== "number" || typeof json.longitude !== "number") {
+        return { result: null };
+      }
+      const parts = [json.city, json.region, json.country_name].filter(Boolean) as string[];
+      return {
+        result: {
+          id: "ip",
+          label: json.city || "Approximate location",
+          address: parts.join(", "),
+          lat: json.latitude,
+          lng: json.longitude,
+        },
+      };
+    } catch (error) {
+      console.error("IP location lookup failed", error);
+      return { result: null };
+    }
   });

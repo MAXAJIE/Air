@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/app-shell";
+import { RequestsPanel } from "@/components/requests-panel";
 import { PhotoPicker } from "@/components/photo-picker";
 import { SignedPhoto } from "@/components/signed-photo";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Textarea } from "@/components/ui/textarea";
 import {
   COVER_HEIGHT,
@@ -57,11 +59,39 @@ export const Route = createFileRoute("/_authenticated/shop")({
   component: ShopPage,
 });
 
+type Section = "shop" | "requests";
+
 function ShopPage() {
+  const t = useT();
+  const [section, setSection] = useState<Section>("shop");
+
+  return (
+    <>
+      <PageHeader
+        title={section === "shop" ? t("shop.title") : t("req.title")}
+        action={
+          <ToggleGroup
+            type="single"
+            value={section}
+            onValueChange={(v) => v && setSection(v as Section)}
+            variant="outline"
+            size="sm"
+            aria-label={t("shop.sectionToggle")}
+          >
+            <ToggleGroupItem value="shop">{t("shop.title")}</ToggleGroupItem>
+            <ToggleGroupItem value="requests">{t("req.title")}</ToggleGroupItem>
+          </ToggleGroup>
+        }
+      />
+      {section === "requests" ? <RequestsPanel /> : <ShopSections />}
+    </>
+  );
+}
+
+function ShopSections() {
   const t = useT();
   return (
     <>
-      <PageHeader title={t("shop.title")} />
       <Tabs defaultValue="orders">
         <TabsList>
           <TabsTrigger value="orders">{t("shop.orders")}</TabsTrigger>
@@ -107,13 +137,30 @@ function OrdersPanel() {
     queryKey: ["workers", groupId],
     enabled: !!groupId,
     queryFn: async () => {
-      const { data } = await supabase
+      // Resolved in two steps: memberships has no foreign key to profiles, so a
+      // PostgREST embed errors out and the worker list would come back empty.
+      const { data, error } = await supabase
         .from("memberships")
-        .select("user_id, profiles:profiles!memberships_user_id_fkey(display_name, username)")
+        .select("user_id")
         .eq("owner_group_id", groupId!)
         .eq("role", "worker")
         .eq("status", "active");
-      return data ?? [];
+      if (error) throw error;
+      if (!data?.length) return [] as Array<{ user_id: string; name: string }>;
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, display_name, username")
+        .in(
+          "user_id",
+          data.map((m) => m.user_id),
+        );
+      return data.map((m) => {
+        const p = profiles?.find((row) => row.user_id === m.user_id);
+        return {
+          user_id: m.user_id,
+          name: p?.display_name || p?.username || m.user_id.slice(0, 8),
+        };
+      });
     },
   });
 
@@ -201,16 +248,11 @@ function OrdersPanel() {
                 <SelectValue placeholder={t("shop.assignWorker")} />
               </SelectTrigger>
               <SelectContent>
-                {(workersQ.data ?? []).map((w) => {
-                  const p = w.profiles as unknown as
-                    | { display_name: string | null; username: string }
-                    | null;
-                  return (
-                    <SelectItem key={w.user_id} value={w.user_id}>
-                      {p?.display_name || p?.username || w.user_id.slice(0, 8)}
-                    </SelectItem>
-                  );
-                })}
+                {(workersQ.data ?? []).map((w) => (
+                  <SelectItem key={w.user_id} value={w.user_id}>
+                    {w.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           )}

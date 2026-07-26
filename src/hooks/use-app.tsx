@@ -10,6 +10,8 @@ export type Profile = {
   email: string;
   username: string;
   display_name: string | null;
+  display_name_updated_at: string | null;
+  avatar_path: string | null;
   primary_role: AppRole | null;
   self_secondary_role: "owner" | "cleaner" | "worker" | null;
 };
@@ -33,7 +35,9 @@ export function useProfile() {
     queryFn: async (): Promise<Profile | null> => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("user_id, email, username, display_name, primary_role, self_secondary_role")
+        .select(
+          "user_id, email, username, display_name, display_name_updated_at, avatar_path, primary_role, self_secondary_role",
+        )
         .eq("user_id", user!.id)
         .maybeSingle();
       if (error) throw error;

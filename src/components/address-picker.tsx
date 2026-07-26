@@ -6,7 +6,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { reverseGeocode, searchAddress, type GeoResult } from "@/lib/geo.functions";
+import {
+  approximateLocation,
+  reverseGeocode,
+  searchAddress,
+  type GeoResult,
+} from "@/lib/geo.functions";
 
 export type PlaceValue = {
   address: string;
@@ -14,6 +19,32 @@ export type PlaceValue = {
   lat: number | null;
   lng: number | null;
 };
+
+/** Reads GPS without ever throwing — returns null whenever the browser blocks it. */
+async function getBrowserPosition(): Promise<{ lat: number; lng: number } | null> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) return null;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (value: { lat: number; lng: number } | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    // Some embedded frames never call either callback, so cap the wait ourselves.
+    const timer = setTimeout(() => done(null), 12000);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        clearTimeout(timer);
+        done({ lat: position.coords.latitude, lng: position.coords.longitude });
+      },
+      () => {
+        clearTimeout(timer);
+        done(null);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    );
+  });
+}
 
 /** Address entry that always resolves to real coordinates — typo-proof by design. */
 export function AddressPicker({
@@ -41,28 +72,39 @@ export function AddressPicker({
   });
 
   const locate = useMutation({
-    mutationFn: async () => {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        if (typeof navigator === "undefined" || !navigator.geolocation) {
-          reject(new Error("This device has no GPS support"));
-          return;
+    mutationFn: async (): Promise<{ result: GeoResult; approximate: boolean }> => {
+      const position = await getBrowserPosition();
+
+      // GPS blocked (denied, embedded frame, no hardware): fall back to a coarse IP fix.
+      if (!position) {
+        const fallback = await approximateLocation();
+        if (!fallback.result) {
+          throw new Error(
+            "Location is turned off for this site. Allow location access in your browser, or type the address instead.",
+          );
         }
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 });
-      });
+        return { result: fallback.result, approximate: true };
+      }
+
       const response = await reverseGeocode({
-        data: { lat: position.coords.latitude, lng: position.coords.longitude },
+        data: { lat: position.lat, lng: position.lng },
       });
-      return (
-        response.result ?? {
-          id: "pin",
-          label: "Pinned location",
-          address: `${position.coords.latitude.toFixed(5)}, ${position.coords.longitude.toFixed(5)}`,
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        }
-      );
+      return {
+        result:
+          response.result ?? {
+            id: "pin",
+            label: "Pinned location",
+            address: `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`,
+            lat: position.lat,
+            lng: position.lng,
+          },
+        approximate: false,
+      };
     },
-    onSuccess: (result) => pick(result),
+    onSuccess: ({ result, approximate }) => {
+      pick(result);
+      if (approximate) toast.info("Approximate location used — check the address before saving.");
+    },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not read your location"),
   });
 
