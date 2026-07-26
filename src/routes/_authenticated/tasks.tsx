@@ -26,8 +26,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useActiveGroup, useProfile } from "@/hooks/use-app";
+import { useGroupMembers } from "@/hooks/use-group-members";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
+import { jobStatusChipClass, statusChipClass } from "@/lib/status-colors";
 
 export const Route = createFileRoute("/_authenticated/tasks")({
   head: () => ({
@@ -76,19 +78,7 @@ function TasksPage() {
     },
   });
 
-  const peopleQ = useQuery({
-    queryKey: ["group-people", groupId],
-    enabled: !!groupId,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("memberships")
-        .select("user_id, role, profiles:profiles!memberships_user_id_fkey(display_name, username)")
-        .eq("owner_group_id", groupId!)
-        .eq("status", "active");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const peopleQ = useGroupMembers(groupId);
 
   const propsQ = useQuery({
     queryKey: ["properties", groupId],
@@ -122,9 +112,7 @@ function TasksPage() {
 
   const nameOf = (userId: string | null) => {
     if (!userId) return t("common.unassigned");
-    const row = (peopleQ.data ?? []).find((p) => p.user_id === userId);
-    const p = row?.profiles as unknown as { display_name: string | null; username: string } | null;
-    return p?.display_name || p?.username || userId.slice(0, 8);
+    return (peopleQ.data ?? []).find((p) => p.user_id === userId)?.name ?? userId.slice(0, 8);
   };
 
   const tasks = (tasksQ.data ?? []).filter((task) => filter === "all" || task.status === filter);
@@ -175,7 +163,9 @@ function TasksPage() {
                 >
                   {task.title}
                 </button>
-                <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[11px] text-secondary-foreground">
+                <span
+                  className={`shrink-0 ${statusChipClass(task.source === "cleaning" ? "blue" : "slate")}`}
+                >
                   {task.source === "cleaning" ? t("task.fromCleaning") : t("task.manual")}
                 </span>
               </span>
@@ -188,7 +178,7 @@ function TasksPage() {
               </span>
             </span>
 
-            <span className="shrink-0 rounded-full border border-border px-2.5 py-1 text-xs">
+            <span className={`shrink-0 ${jobStatusChipClass(task.status)}`}>
               {task.status === "in_progress"
                 ? t("task.inProgress")
                 : task.status === "submitted"
@@ -236,7 +226,7 @@ function TasksPage() {
         <CreateTaskDialog
           groupId={groupId}
           createdBy={profile.user_id}
-          people={(peopleQ.data ?? []).map((p) => ({ userId: p.user_id, name: nameOf(p.user_id) }))}
+          people={(peopleQ.data ?? []).map((p) => ({ userId: p.user_id, name: p.name }))}
           properties={propsQ.data ?? []}
           onClose={() => setCreating(false)}
         />

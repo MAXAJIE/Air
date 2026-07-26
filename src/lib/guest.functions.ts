@@ -1,48 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import { admin, requireSession, uploadGuestPhoto, uuid } from "@/lib/guest-internal";
+
 /**
  * Guest (no-login) flows. Guests never touch the database directly: every call
  * here re-validates the stay code / session against the property before writing.
  */
-
-const uuid = z.string().uuid();
-
-async function admin() {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  return supabaseAdmin;
-}
-
-async function requireSession(sessionId: string, propertyId: string) {
-  const db = await admin();
-  const { data, error } = await db
-    .from("customer_sessions")
-    .select("id, property_id, expires_at")
-    .eq("id", sessionId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data || data.property_id !== propertyId) throw new Error("Invalid stay session");
-  if (new Date(data.expires_at).getTime() < Date.now()) throw new Error("expired");
-  return data;
-}
-
-function decode(base64: string) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
-async function uploadGuestPhoto(propertyId: string, fileName: string, contentType: string, dataBase64: string) {
-  const db = await admin();
-  const ext = fileName.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
-  const path = `guest/${propertyId}/${crypto.randomUUID()}.${ext}`;
-  const { error } = await db.storage
-    .from("photos")
-    .upload(path, decode(dataBase64), { contentType, upsert: false });
-  if (error) throw new Error(error.message);
-  return path;
-}
 
 /** Public property header shown before the stay code is entered. */
 export const getGuestProperty = createServerFn({ method: "GET" })
@@ -104,13 +68,8 @@ export const getGuestContext = createServerFn({ method: "POST" })
         .select("id, name, price, description")
         .eq("owner_group_id", property!.owner_group_id)
         .eq("active", true),
-      db
-        .from("payment_qr_codes")
-        .select("qr_image_url, label")
-        .eq("owner_group_id", property!.owner_group_id)
-        .eq("active", true)
-        .limit(1)
-        .maybeSingle(),
+      // QR bytes are encrypted at rest; the RPC decrypts for the service role.
+      db.rpc("get_payment_qr", { p_group: property!.owner_group_id }),
       db
         .from("cleaning_jobs")
         .select("id, assigned_to_user_id, completed_at")
@@ -122,9 +81,14 @@ export const getGuestContext = createServerFn({ method: "POST" })
         .maybeSingle(),
     ]);
 
+    const qrRow = (qr ?? null) as
+      | { label: string | null; content_type: string; legacy_path: string | null; data_base64: string | null }
+      | null;
     let qrUrl: string | null = null;
-    if (qr?.qr_image_url) {
-      const { data: signed } = await db.storage.from("photos").createSignedUrl(qr.qr_image_url, 3600);
+    if (qrRow?.data_base64) {
+      qrUrl = `data:${qrRow.content_type};base64,${qrRow.data_base64}`;
+    } else if (qrRow?.legacy_path) {
+      const { data: signed } = await db.storage.from("photos").createSignedUrl(qrRow.legacy_path, 3600);
       qrUrl = signed?.signedUrl ?? null;
     }
 
@@ -147,7 +111,7 @@ export const getGuestContext = createServerFn({ method: "POST" })
       amenities: amenities ?? [],
       catalog: (items ?? []).map((i) => ({ ...i, price: Number(i.price) })),
       qrUrl,
-      qrLabel: qr?.label ?? null,
+      qrLabel: qrRow?.label ?? null,
       cleaner,
     };
   });

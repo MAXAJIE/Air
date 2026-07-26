@@ -8,9 +8,6 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   clearPendingVerification,
   isIdleExpired,
-  isUnverifiedExpired,
-  isVerified,
-  purgeUnverifiedSession,
   signOutForInactivity,
   touchActivity,
 } from "@/lib/session-hygiene";
@@ -20,20 +17,13 @@ export const Route = createFileRoute("/_authenticated")({
   beforeLoad: async ({ context }) => {
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user) throw redirect({ to: "/auth" });
-    // Accounts that never confirmed their email expire after 5 minutes: wipe everything.
-    if (isUnverifiedExpired(data.user)) {
-      await purgeUnverifiedSession(context.queryClient);
+    // The session is only ever dropped after 15 minutes without interaction.
+    clearPendingVerification();
+    if (isIdleExpired()) {
+      await signOutForInactivity(context.queryClient);
       throw redirect({ to: "/auth" });
     }
-    // Verified accounts are kept: they are only signed out after 15 idle minutes.
-    if (isVerified(data.user)) {
-      clearPendingVerification();
-      if (isIdleExpired()) {
-        await signOutForInactivity(context.queryClient);
-        throw redirect({ to: "/auth" });
-      }
-      touchActivity();
-    }
+    touchActivity();
     return { user: data.user };
   },
   component: AuthenticatedLayout,

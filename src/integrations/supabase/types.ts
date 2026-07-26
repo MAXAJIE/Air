@@ -92,20 +92,29 @@ export type Database = {
         Row: {
           expected_qty: number
           id: string
+          image_path: string | null
           name: string
+          notes: string | null
           property_id: string
+          template_id: string | null
         }
         Insert: {
           expected_qty?: number
           id?: string
+          image_path?: string | null
           name: string
+          notes?: string | null
           property_id: string
+          template_id?: string | null
         }
         Update: {
           expected_qty?: number
           id?: string
+          image_path?: string | null
           name?: string
+          notes?: string | null
           property_id?: string
+          template_id?: string | null
         }
         Relationships: [
           {
@@ -113,6 +122,80 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "amenity_definitions_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "amenity_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      amenity_template_items: {
+        Row: {
+          expected_qty: number
+          id: string
+          image_path: string | null
+          name: string
+          notes: string | null
+          sort_order: number
+          template_id: string
+        }
+        Insert: {
+          expected_qty?: number
+          id?: string
+          image_path?: string | null
+          name: string
+          notes?: string | null
+          sort_order?: number
+          template_id: string
+        }
+        Update: {
+          expected_qty?: number
+          id?: string
+          image_path?: string | null
+          name?: string
+          notes?: string | null
+          sort_order?: number
+          template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "amenity_template_items_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "amenity_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      amenity_templates: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          owner_group_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          owner_group_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          owner_group_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "amenity_templates_owner_group_id_fkey"
+            columns: ["owner_group_id"]
+            isOneToOne: false
+            referencedRelation: "owner_groups"
             referencedColumns: ["id"]
           },
         ]
@@ -586,24 +669,36 @@ export type Database = {
       payment_qr_codes: {
         Row: {
           active: boolean
+          content_type: string | null
+          created_at: string
           id: string
           label: string | null
           owner_group_id: string
-          qr_image_url: string
+          qr_image_enc: string | null
+          qr_image_url: string | null
+          updated_at: string
         }
         Insert: {
           active?: boolean
+          content_type?: string | null
+          created_at?: string
           id?: string
           label?: string | null
           owner_group_id: string
-          qr_image_url: string
+          qr_image_enc?: string | null
+          qr_image_url?: string | null
+          updated_at?: string
         }
         Update: {
           active?: boolean
+          content_type?: string | null
+          created_at?: string
           id?: string
           label?: string | null
           owner_group_id?: string
-          qr_image_url?: string
+          qr_image_enc?: string | null
+          qr_image_url?: string | null
+          updated_at?: string
         }
         Relationships: [
           {
@@ -780,18 +875,21 @@ export type Database = {
       }
       property_statuses: {
         Row: {
+          color: string
           id: string
           label: string
           owner_group_id: string
           sort_order: number
         }
         Insert: {
+          color?: string
           id?: string
           label: string
           owner_group_id: string
           sort_order?: number
         }
         Update: {
+          color?: string
           id?: string
           label?: string
           owner_group_id?: string
@@ -1138,7 +1236,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      amenity_template_group: { Args: { _tpl: string }; Returns: string }
+      apply_amenity_template: {
+        Args: { p_property: string; p_replace?: boolean; p_template: string }
+        Returns: number
+      }
       can_view_pii: { Args: { _user: string }; Returns: boolean }
+      delete_payment_qr: { Args: { p_group: string }; Returns: undefined }
+      get_payment_qr: { Args: { p_group: string }; Returns: Json }
       get_pii: { Args: { _user: string }; Returns: Json }
       group_owner_id: { Args: { _group: string }; Returns: string }
       is_group_member: { Args: { _group: string }; Returns: boolean }
@@ -1152,6 +1257,15 @@ export type Database = {
       property_group: { Args: { _property: string }; Returns: string }
       redeem_hr_invite_code: { Args: { p_code: string }; Returns: Json }
       redeem_invite_code: { Args: { p_code: string }; Returns: Json }
+      save_payment_qr: {
+        Args: {
+          p_content_type: string
+          p_data_base64: string
+          p_group: string
+          p_label?: string
+        }
+        Returns: string
+      }
       save_my_pii: {
         Args: {
           p_address: string

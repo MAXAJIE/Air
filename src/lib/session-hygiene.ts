@@ -3,9 +3,10 @@ import type { User } from "@supabase/supabase-js";
 
 import { supabase } from "@/integrations/supabase/client";
 
-/** Unverified accounts get 5 minutes before their local session/cache is wiped. */
-export const UNVERIFIED_TTL_MS = 5 * 60 * 1000;
-/** Verified accounts stay signed in until 15 minutes pass with no interaction. */
+/**
+ * Sessions are only ever ended by inactivity: 15 minutes with no interaction.
+ * Nothing else signs a user out — an unconfirmed email keeps working.
+ */
 export const INACTIVITY_TTL_MS = 15 * 60 * 1000;
 export const PENDING_VERIFY_KEY = "keyward.pendingVerify";
 export const LAST_ACTIVE_KEY = "keyward.lastActive";
@@ -81,30 +82,4 @@ export function clearPendingVerification() {
 export function isUnverified(user: User | null | undefined): boolean {
   if (!user) return false;
   return !user.email_confirmed_at && !user.confirmed_at;
-}
-
-export function isUnverifiedExpired(user: User | null | undefined): boolean {
-  if (!isUnverified(user)) return false;
-  const created = user?.created_at ? Date.parse(user.created_at) : Date.now();
-  return Date.now() - created > UNVERIFIED_TTL_MS;
-}
-
-/** Wipe every trace of the unverified attempt: session, query cache, app storage. */
-export async function purgeUnverifiedSession(queryClient?: QueryClient) {
-  clearPendingVerification();
-  if (queryClient) {
-    await queryClient.cancelQueries();
-    queryClient.clear();
-  }
-  try {
-    await supabase.auth.signOut();
-  } catch {
-    // session may already be gone
-  }
-  if (typeof window !== "undefined") {
-    for (const key of Object.keys(window.localStorage)) {
-      if (key.startsWith("keyward.") || key.startsWith("sb-")) window.localStorage.removeItem(key);
-    }
-    window.sessionStorage.clear();
-  }
 }

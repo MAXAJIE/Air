@@ -1,4 +1,3 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -13,19 +12,15 @@ import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { PasswordMeter } from "@/components/password-meter";
 import {
-  UNVERIFIED_TTL_MS,
-  clearPendingVerification,
-  isVerified,
   markPendingVerification,
-  purgeUnverifiedSession,
-  readPendingVerification,
   touchActivity,
 } from "@/lib/session-hygiene";
 
 
 export const Route = createFileRoute("/auth")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    mode: search.mode === "signup" ? ("signup" as const) : ("signin" as const),
+  // `mode` stays optional so plain `<Link to="/auth">` / redirects stay type-safe.
+  validateSearch: (search: Record<string, unknown>): { mode?: "signin" | "signup" } => ({
+    mode: search.mode === "signup" ? "signup" : "signin",
   }),
   head: () => ({
     meta: [
@@ -53,31 +48,6 @@ function AuthPage() {
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [forgot, setForgot] = useState(false);
-  const queryClient = useQueryClient();
-
-  // Unverified signups get 5 minutes; verified accounts are never purged here.
-  useEffect(() => {
-    const pending = readPendingVerification();
-    if (!pending) return;
-    const expire = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (isVerified(data.user)) {
-        clearPendingVerification();
-        touchActivity();
-        return;
-      }
-      await purgeUnverifiedSession(queryClient);
-      toast.error(t("auth.verifyExpired"));
-    };
-    const remaining = pending.at + UNVERIFIED_TTL_MS - Date.now();
-    if (remaining <= 0) {
-      void expire();
-      return;
-    }
-    const timer = window.setTimeout(() => void expire(), remaining);
-    return () => window.clearTimeout(timer);
-  }, [queryClient, t]);
-
 
 
 

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { MapPin, Plus } from "lucide-react";
+import { ExternalLink, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -31,6 +31,7 @@ import { useActiveGroup } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { randomCode } from "@/lib/files";
+import { statusChipClass } from "@/lib/status-colors";
 
 export const Route = createFileRoute("/_authenticated/properties/")({
   head: () => ({
@@ -47,6 +48,14 @@ export const Route = createFileRoute("/_authenticated/properties/")({
 
 const EMPTY_PLACE: PlaceValue = { address: "", placeName: null, lat: null, lng: null };
 
+type EditState = {
+  id: string;
+  name: string;
+  place: PlaceValue;
+  photoPath: string | null;
+  statusId: string | null;
+};
+
 function PropertiesPage() {
   const t = useT();
   const qc = useQueryClient();
@@ -59,6 +68,7 @@ function PropertiesPage() {
   const [name, setName] = useState("");
   const [place, setPlace] = useState<PlaceValue>(EMPTY_PLACE);
   const [photoPath, setPhotoPath] = useState<string | null>(null);
+  const [edit, setEdit] = useState<EditState | null>(null);
 
   const setViewMode = (v: ViewMode) => {
     setView(v);
@@ -89,7 +99,7 @@ function PropertiesPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("property_statuses")
-        .select("id, label, sort_order")
+        .select("id, label, sort_order, color")
         .eq("owner_group_id", groupId!)
         .order("sort_order");
       if (error) throw error;
@@ -122,8 +132,102 @@ function PropertiesPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
   });
 
-  const statusLabel = (id: string | null) =>
-    statuses?.find((s) => s.id === id)?.label ?? t("common.unassigned");
+  const update = useMutation({
+    mutationFn: async (values: EditState) => {
+      const { error } = await supabase
+        .from("properties")
+        .update({
+          name: values.name.trim(),
+          address: values.place.address.trim() || null,
+          place_name: values.place.placeName,
+          lat: values.place.lat,
+          lng: values.place.lng,
+          photo_path: values.photoPath,
+          status_id: values.statusId,
+        })
+        .eq("id", values.id);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["properties", groupId] });
+      setEdit(null);
+      toast.success(t("common.saved"));
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("properties").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["properties", groupId] });
+      toast.success(t("common.saved"));
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const statusOf = (id: string | null) => statuses?.find((s) => s.id === id) ?? null;
+  const statusLabel = (id: string | null) => statusOf(id)?.label ?? t("common.unassigned");
+  const statusColor = (id: string | null) => statusOf(id)?.color ?? null;
+
+  type PropertyRow = NonNullable<typeof properties>[number];
+
+  const startEdit = (p: PropertyRow) =>
+    setEdit({
+      id: p.id,
+      name: p.name,
+      place: {
+        address: p.address ?? "",
+        placeName: p.place_name ?? null,
+        lat: p.lat ?? null,
+        lng: p.lng ?? null,
+      },
+      photoPath: p.photo_path ?? null,
+      statusId: p.status_id ?? null,
+    });
+
+  const confirmDelete = (p: PropertyRow) => {
+    if (typeof window !== "undefined" && !window.confirm(t("prop.deleteConfirm"))) return;
+    remove.mutate(p.id);
+  };
+
+  /** Owner row actions: preview the guest page, edit the record, delete it. */
+  const RowActions = ({ p }: { p: PropertyRow }) => (
+    <span className="flex shrink-0 items-center gap-1">
+      {p.access_code ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={t("prop.guestLink")}
+          title={t("prop.guestLink")}
+          onClick={() => window.open(`/g/${p.access_code}`, "_blank", "noopener,noreferrer")}
+        >
+          <ExternalLink className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      ) : null}
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={t("prop.edit")}
+        title={t("prop.edit")}
+        onClick={() => startEdit(p)}
+      >
+        <Pencil className="h-4 w-4" aria-hidden="true" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={t("common.delete")}
+        title={t("common.delete")}
+        disabled={remove.isPending}
+        onClick={() => confirmDelete(p)}
+      >
+        <Trash2 className="h-4 w-4" aria-hidden="true" />
+      </Button>
+    </span>
+  );
 
   return (
     <>
@@ -178,11 +282,11 @@ function PropertiesPage() {
       ) : view === "list" ? (
         <ul className="surface divide-y divide-border">
           {properties!.map((p) => (
-            <li key={p.id}>
+            <li key={p.id} className="flex items-center gap-1 pr-2 transition-colors hover:bg-accent">
               <Link
                 to="/properties/$propertyId"
                 params={{ propertyId: p.id }}
-                className="flex items-center gap-3 p-3 transition-colors hover:bg-accent"
+                className="flex min-w-0 flex-1 items-center gap-3 p-3"
               >
                 {p.photo_path ? (
                   <SignedPhoto path={p.photo_path} alt={p.name} className="h-12 w-16 shrink-0 object-cover" />
@@ -195,52 +299,115 @@ function PropertiesPage() {
                   <span className="block truncate font-medium">{p.name}</span>
                   <span className="block truncate text-xs text-muted-foreground">{p.address ?? "—"}</span>
                 </span>
-                <span className="hidden shrink-0 rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground sm:inline">
+                <span className={`hidden shrink-0 sm:inline-flex ${statusChipClass(statusColor(p.status_id))}`}>
                   {statusLabel(p.status_id)}
                 </span>
                 <span className="hidden shrink-0 font-mono text-xs text-muted-foreground md:inline">
                   {p.access_code}
                 </span>
               </Link>
+              <RowActions p={p} />
             </li>
           ))}
         </ul>
       ) : (
         <div className={GRID_COLS[size]}>
           {properties!.map((p) => (
-            <Link
+            <div
               key={p.id}
-              to="/properties/$propertyId"
-              params={{ propertyId: p.id }}
-              className="surface block overflow-hidden transition-shadow hover:shadow-[var(--shadow-lift)]"
+              className="surface overflow-hidden transition-shadow hover:shadow-[var(--shadow-lift)]"
             >
-              {p.photo_path ? (
-                <SignedPhoto
-                  path={p.photo_path}
-                  alt={p.name}
-                  className={`w-full rounded-none object-cover ${COVER_HEIGHT[size]}`}
-                />
-              ) : (
-                <div className={`flex w-full items-center justify-center bg-muted ${COVER_HEIGHT[size]}`}>
-                  <MapPin className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
-                </div>
-              )}
-              <div className="p-4">
-                <p className="truncate font-display text-base font-semibold">{p.name}</p>
-                <p className="mt-1 truncate text-xs text-muted-foreground">{p.address ?? "—"}</p>
-                {size !== "sm" && (
-                  <div className="mt-3 flex items-center justify-between gap-2 text-xs">
-                    <span className="rounded-full bg-secondary px-2.5 py-1 text-secondary-foreground">
-                      {statusLabel(p.status_id)}
-                    </span>
-                    <span className="font-mono text-muted-foreground">{p.access_code}</span>
+              <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="block">
+                {p.photo_path ? (
+                  <SignedPhoto
+                    path={p.photo_path}
+                    alt={p.name}
+                    className={`w-full rounded-none object-cover ${COVER_HEIGHT[size]}`}
+                  />
+                ) : (
+                  <div className={`flex w-full items-center justify-center bg-muted ${COVER_HEIGHT[size]}`}>
+                    <MapPin className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
                   </div>
                 )}
+                <div className="p-4">
+                  <p className="truncate font-display text-base font-semibold">{p.name}</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">{p.address ?? "—"}</p>
+                  {size !== "sm" && (
+                    <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+                      <span className={statusChipClass(statusColor(p.status_id))}>
+                        {statusLabel(p.status_id)}
+                      </span>
+                      <span className="font-mono text-muted-foreground">{p.access_code}</span>
+                    </div>
+                  )}
+                </div>
+              </Link>
+              <div className="flex items-center justify-end border-t border-border px-2 py-1">
+                <RowActions p={p} />
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}
+
+      <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("prop.edit")}</DialogTitle>
+          </DialogHeader>
+          {edit ? (
+            <div className="space-y-4">
+              <PhotoPicker
+                value={edit.photoPath}
+                onChange={(v) => setEdit({ ...edit, photoPath: v })}
+                folder="properties"
+                label={t("prop.coverAdd")}
+              />
+              <div className="space-y-2">
+                <Label htmlFor="p-edit-name">{t("common.name")}</Label>
+                <Input
+                  id="p-edit-name"
+                  value={edit.name}
+                  onChange={(e) => setEdit({ ...edit, name: e.target.value })}
+                />
+              </div>
+              <AddressPicker
+                value={edit.place}
+                onChange={(v) => setEdit({ ...edit, place: v })}
+                label={t("prop.address")}
+              />
+              <div className="space-y-2">
+                <Label>{t("common.status")}</Label>
+                <div className="flex flex-wrap gap-2">
+                  {(statuses ?? []).map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setEdit({ ...edit, statusId: s.id })}
+                      className={`${statusChipClass(s.color)} ${
+                        edit.statusId === s.id ? "ring-2 ring-ring" : ""
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEdit(null)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              disabled={!edit?.name.trim() || update.isPending}
+              onClick={() => edit && update.mutate(edit)}
+            >
+              {t("common.save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

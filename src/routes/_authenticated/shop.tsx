@@ -41,7 +41,6 @@ import { useActiveGroup } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { fileToBase64 } from "@/lib/files";
-import { uploadPhoto } from "@/lib/photos.functions";
 
 export const Route = createFileRoute("/_authenticated/shop")({
   head: () => ({
@@ -612,6 +611,18 @@ function PreviewPanel() {
   );
 }
 
+type PaymentQr = {
+  id: string;
+  label: string | null;
+  content_type: string;
+  legacy_path: string | null;
+  data_base64: string | null;
+};
+
+/**
+ * The QR image itself lives encrypted in the database and stays there until the
+ * owner replaces or deletes it — nothing here writes it to public storage.
+ */
 function QrPanel() {
   const t = useT();
   const qc = useQueryClient();
@@ -622,32 +633,23 @@ function QrPanel() {
     queryKey: ["qr", groupId],
     enabled: !!groupId,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("payment_qr_codes")
-        .select("id, qr_image_url, label, active")
-        .eq("owner_group_id", groupId!)
-        .eq("active", true)
-        .maybeSingle();
+      const { data, error } = await supabase.rpc("get_payment_qr", { p_group: groupId! });
       if (error) throw error;
-      return data;
+      return (data as PaymentQr | null) ?? null;
     },
   });
 
   async function onFile(file: File) {
     setBusy(true);
     try {
+      if (file.size > 8 * 1024 * 1024) throw new Error(t("shop.qrTooLarge"));
       const dataBase64 = await fileToBase64(file);
-      const { path } = await uploadPhoto({
-        data: {
-          folder: "qr",
-          fileName: file.name,
-          contentType: file.type || "image/png",
-          dataBase64,
-        },
+      const { error } = await supabase.rpc("save_payment_qr", {
+        p_group: groupId!,
+        p_data_base64: dataBase64,
+        p_content_type: file.type || "image/png",
+        p_label: undefined,
       });
-      const { error } = await supabase
-        .from("payment_qr_codes")
-        .insert({ owner_group_id: groupId!, qr_image_url: path });
       if (error) throw error;
       await qc.invalidateQueries({ queryKey: ["qr", groupId] });
       toast.success(t("common.saved"));
@@ -658,19 +660,44 @@ function QrPanel() {
     }
   }
 
+  const remove = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc("delete_payment_qr", { p_group: groupId! });
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["qr", groupId] });
+      toast.success(t("shop.qrDeleted"));
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const qr = qrQ.data;
+  const inlineSrc = qr?.data_base64
+    ? `data:${qr.content_type};base64,${qr.data_base64}`
+    : null;
+
   return (
     <section className="surface max-w-md space-y-3 p-5">
       <h2 className="text-lg">{t("shop.qr")}</h2>
       <p className="text-sm text-muted-foreground">{t("shop.qrHelp")}</p>
-      {qrQ.data?.qr_image_url && (
+      <p className="text-xs text-muted-foreground">{t("shop.qrEncrypted")}</p>
+      {inlineSrc && (
+        <img
+          src={inlineSrc}
+          alt={t("shop.qr")}
+          className="h-56 w-56 rounded-md object-contain"
+        />
+      )}
+      {!inlineSrc && qr?.legacy_path && (
         <SignedPhoto
-          path={qrQ.data.qr_image_url}
+          path={qr.legacy_path}
           alt={t("shop.qr")}
           className="h-56 w-56 rounded-md object-contain"
         />
       )}
       <div className="space-y-2">
-        <Label htmlFor="qr-file">{t("shop.uploadQr")}</Label>
+        <Label htmlFor="qr-file">{qr ? t("shop.replaceQr") : t("shop.uploadQr")}</Label>
         <Input
           id="qr-file"
           type="file"
@@ -682,6 +709,17 @@ function QrPanel() {
           }}
         />
       </div>
+      {qr && (
+        <Button
+          variant="outline"
+          disabled={remove.isPending}
+          onClick={() => {
+            if (window.confirm(t("shop.qrDeleteConfirm"))) remove.mutate();
+          }}
+        >
+          {t("shop.deleteQr")}
+        </Button>
+      )}
     </section>
   );
 }

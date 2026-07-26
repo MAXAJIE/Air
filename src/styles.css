@@ -171,3 +171,97 @@
     oklch(0.42 0.075 205) 100%
   );
 }
+
+/*
+ * Status colour tokens — one palette entry per selectable status colour.
+ * Components never hardcode colours: they pick a `status-chip-*` utility.
+ */
+:root {
+  --status-slate-bg: oklch(0.94 0.012 240);
+  --status-slate-fg: oklch(0.36 0.03 240);
+  --status-blue-bg: oklch(0.93 0.045 235);
+  --status-blue-fg: oklch(0.42 0.11 245);
+  --status-green-bg: oklch(0.93 0.055 155);
+  --status-green-fg: oklch(0.4 0.1 155);
+  --status-amber-bg: oklch(0.94 0.07 85);
+  --status-amber-fg: oklch(0.44 0.11 70);
+  --status-rose-bg: oklch(0.93 0.05 20);
+  --status-rose-fg: oklch(0.45 0.15 20);
+  --status-violet-bg: oklch(0.93 0.045 300);
+  --status-violet-fg: oklch(0.43 0.13 300);
+}
+
+.dark {
+  --status-slate-bg: oklch(0.32 0.03 240);
+  --status-slate-fg: oklch(0.9 0.015 240);
+  --status-blue-bg: oklch(0.33 0.07 240);
+  --status-blue-fg: oklch(0.88 0.05 235);
+  --status-green-bg: oklch(0.32 0.07 155);
+  --status-green-fg: oklch(0.88 0.06 155);
+  --status-amber-bg: oklch(0.35 0.08 75);
+  --status-amber-fg: oklch(0.92 0.07 85);
+  --status-rose-bg: oklch(0.34 0.09 20);
+  --status-rose-fg: oklch(0.9 0.06 20);
+  --status-violet-bg: oklch(0.33 0.08 300);
+  --status-violet-fg: oklch(0.9 0.05 300);
+}
+
+@utility status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 9999px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  white-space: nowrap;
+}
+
+@utility status-chip-slate {
+  background-color: var(--status-slate-bg);
+  color: var(--status-slate-fg);
+}
+
+@utility status-chip-blue {
+  background-color: var(--status-blue-bg);
+  color: var(--status-blue-fg);
+}
+
+@utility status-chip-green {
+  background-color: var(--status-green-bg);
+  color: var(--status-green-fg);
+}
+
+@utility status-chip-amber {
+  background-color: var(--status-amber-bg);
+  color: var(--status-amber-fg);
+}
+
+@utility status-chip-rose {
+  background-color: var(--status-rose-bg);
+  color: var(--status-rose-fg);
+}
+
+@utility status-chip-violet {
+  background-color: var(--status-violet-bg);
+  color: var(--status-violet-fg);
+}
+
+@utility status-dot-slate {
+  background-color: var(--status-slate-fg);
+}
+@utility status-dot-blue {
+  background-color: var(--status-blue-fg);
+}
+@utility status-dot-green {
+  background-color: var(--status-green-fg);
+}
+@utility status-dot-amber {
+  background-color: var(--status-amber-fg);
+}
+@utility status-dot-rose {
+  background-color: var(--status-rose-fg);
+}
+@utility status-dot-violet {
+  background-color: var(--status-violet-fg);
+}

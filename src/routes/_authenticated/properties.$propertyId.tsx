@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Copy, Plus } from "lucide-react";
+import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
+import { ArrowLeft, Copy, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -18,6 +18,7 @@ import {
 import { useActiveGroup, useProfile } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
+import { STATUS_COLORS, statusChipClass, statusDotClass } from "@/lib/status-colors";
 
 export const Route = createFileRoute("/_authenticated/properties/$propertyId")({
   head: () => ({
@@ -78,8 +79,12 @@ function PropertyDetailView() {
   const t = useT();
   const qc = useQueryClient();
   const { propertyId } = Route.useParams();
+  const navigate = useNavigate();
   const { groupId } = useActiveGroup();
   const [statusLabel, setStatusLabel] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editAddress, setEditAddress] = useState("");
 
   const propertyQ = useQuery({
     queryKey: ["property", propertyId],
@@ -100,7 +105,7 @@ function PropertyDetailView() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("property_statuses")
-        .select("id, label, sort_order")
+        .select("id, label, sort_order, color")
         .eq("owner_group_id", groupId!)
         .order("sort_order");
       if (error) throw error;
@@ -123,13 +128,45 @@ function PropertyDetailView() {
   });
 
   const patch = useMutation({
-    mutationFn: async (values: { status_id?: string | null; default_template_id?: string | null }) => {
+    mutationFn: async (values: {
+      status_id?: string | null;
+      default_template_id?: string | null;
+      name?: string;
+      address?: string | null;
+    }) => {
       const { error } = await supabase.from("properties").update(values).eq("id", propertyId);
       if (error) throw error;
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["property", propertyId] });
       toast.success(t("common.saved"));
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const setStatusColor = useMutation({
+    mutationFn: async (values: { id: string; color: string }) => {
+      const { error } = await supabase
+        .from("property_statuses")
+        .update({ color: values.color })
+        .eq("id", values.id);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["property-statuses", groupId] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const removeProperty = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("properties").delete().eq("id", propertyId);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["properties", groupId] });
+      toast.success(t("common.saved"));
+      navigate({ to: "/properties" });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
   });
@@ -166,7 +203,78 @@ function PropertyDetailView() {
         {t("common.back")}
       </Link>
 
-      <PageHeader title={property?.name ?? t("prop.title")} description={property?.address ?? undefined} />
+      <PageHeader
+        title={property?.name ?? t("prop.title")}
+        description={property?.address ?? undefined}
+        action={
+          <div className="flex items-center gap-2">
+            {property?.access_code ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(guestLink, "_blank", "noopener,noreferrer")}
+              >
+                <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                {t("prop.guestLink")}
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setEditName(property?.name ?? "");
+                setEditAddress(property?.address ?? "");
+                setEditOpen(true);
+              }}
+            >
+              {t("prop.edit")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={removeProperty.isPending}
+              onClick={() => {
+                if (typeof window !== "undefined" && !window.confirm(t("prop.deleteConfirm"))) return;
+                removeProperty.mutate();
+              }}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              {t("common.delete")}
+            </Button>
+          </div>
+        }
+      />
+
+      {editOpen ? (
+        <section className="surface mb-4 space-y-3 p-5">
+          <h2 className="text-lg">{t("prop.edit")}</h2>
+          <div className="space-y-2">
+            <Label htmlFor="pd-name">{t("common.name")}</Label>
+            <Input id="pd-name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pd-address">{t("prop.address")}</Label>
+            <Input id="pd-address" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} />
+          </div>
+          <div className="flex gap-2">
+            <Button
+              disabled={!editName.trim() || patch.isPending}
+              onClick={async () => {
+                await patch.mutateAsync({
+                  name: editName.trim(),
+                  address: editAddress.trim() || null,
+                });
+                setEditOpen(false);
+              }}
+            >
+              {t("common.save")}
+            </Button>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="surface space-y-4 p-5">
@@ -201,6 +309,28 @@ function PropertyDetailView() {
               <Plus className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
+
+          <ul className="space-y-2">
+            {(statusesQ.data ?? []).map((s) => (
+              <li key={s.id} className="flex items-center justify-between gap-2">
+                <span className={statusChipClass(s.color)}>{s.label}</span>
+                <span className="flex items-center gap-1">
+                  {STATUS_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      aria-label={c}
+                      title={c}
+                      onClick={() => setStatusColor.mutate({ id: s.id, color: c })}
+                      className={`h-4 w-4 rounded-full ${statusDotClass(c)} ${
+                        s.color === c ? "ring-2 ring-ring" : ""
+                      }`}
+                    />
+                  ))}
+                </span>
+              </li>
+            ))}
+          </ul>
 
           <div className="space-y-2">
             <Label>{t("prop.defaultTemplate")}</Label>
