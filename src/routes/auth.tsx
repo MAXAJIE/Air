@@ -19,8 +19,10 @@ import {
 
 export const Route = createFileRoute("/auth")({
   // `mode` stays optional so plain `<Link to="/auth">` / redirects stay type-safe.
-  validateSearch: (search: Record<string, unknown>): { mode?: "signin" | "signup" } => ({
+  validateSearch: (search: Record<string, unknown>): { mode?: "signin" | "signup"; next?: string; code?: string } => ({
     mode: search.mode === "signup" ? "signup" : "signin",
+    next: typeof search.next === "string" ? search.next : undefined,
+    code: typeof search.code === "string" ? search.code : undefined,
   }),
   head: () => ({
     meta: [
@@ -37,7 +39,7 @@ export const Route = createFileRoute("/auth")({
 function AuthPage() {
   const t = useT();
   const navigate = useNavigate();
-  const { mode } = Route.useSearch();
+  const { mode, next, code } = Route.useSearch();
 
   const [identifier, setIdentifier] = useState("");
   const [email, setEmail] = useState("");
@@ -87,6 +89,14 @@ function AuthPage() {
       setBusy(false);
     }
   }
+
+  // If an invite code is in the URL, stash it in sessionStorage so it
+  // survives email verification and role selection.
+  useEffect(() => {
+    if (code && next === "redeem") {
+      sessionStorage.setItem("pending_invite_code", code);
+    }
+  }, [code, next]);
 
   async function handleSignUp(event: React.FormEvent) {
     event.preventDefault();
@@ -225,6 +235,11 @@ function AuthPage() {
             </TabsContent>
 
             <TabsContent value="signup">
+              {next === "redeem" && (
+                <div className="surface mt-4 mb-4 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
+                  Have an invite code? Sign up first, then paste it in your account once ready.
+                </div>
+              )}
               <form onSubmit={handleSignUp} className="surface mt-4 space-y-4 p-6">
                 <div className="space-y-2">
                   <Label htmlFor="email">{t("auth.email")}</Label>

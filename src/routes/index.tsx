@@ -63,7 +63,7 @@ function Landing() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link to="/auth">{t("landing.ctaSecondary")}</Link>
+              <Link to="/auth" search={{ mode: "signup", next: "redeem" }}>{t("landing.ctaSecondary")}</Link>
             </Button>
           </div>
         </section>

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Eye, Pencil, Plus, Trash2 } from "lucide-react";
+import { Building2, Eye, Pencil, Plus, Trash2, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -113,7 +113,9 @@ function JobsPanel() {
   const { groupId } = useActiveGroup();
   const [propertyId, setPropertyId] = useState("");
   const [templateId, setTemplateId] = useState("");
+  const [assignType, setAssignType] = useState<"direct" | "hr_company">("direct");
   const [assignee, setAssignee] = useState("");
+  const [hrCompanyId, setHrCompanyId] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
   const [editingJob, setEditingJob] = useState<JobRow | null>(null);
   const [previewJob, setPreviewJob] = useState<JobRow | null>(null);
@@ -148,6 +150,32 @@ function JobsPanel() {
   // Cleaners AND workers of this group can take a clean.
   const cleanersQ = useGroupMembers(groupId, ["cleaner", "worker"]);
 
+  // HR companies affiliated with this group
+  const hrCompaniesQ = useQuery({
+    queryKey: ["hr-affiliations-select", groupId],
+    enabled: !!groupId && assignType === "hr_company",
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("hr_affiliations")
+        .select("hr_company_user_id")
+        .eq("owner_group_id", groupId!)
+        .eq("status", "active");
+      if (error) throw error;
+      if (!data?.length) return [];
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, display_name, username")
+        .in("user_id", data.map((h) => h.hr_company_user_id));
+      return data.map((h) => ({
+        userId: h.hr_company_user_id,
+        name:
+          profiles?.find((p) => p.user_id === h.hr_company_user_id)?.display_name ||
+          profiles?.find((p) => p.user_id === h.hr_company_user_id)?.username ||
+          h.hr_company_user_id.slice(0, 8),
+      }));
+    },
+  });
+
   const jobsQ = useQuery({
     queryKey: ["jobs", groupId],
     enabled: !!groupId,
@@ -168,23 +196,31 @@ function JobsPanel() {
   const missing: string[] = [];
   if (!propertyId) missing.push(t("clean.property"));
   if (!templateId) missing.push(t("clean.template"));
-  if (!assignee) missing.push(t("clean.assignDirect"));
+  if (assignType === "direct" && !assignee) missing.push(t("clean.assignDirect"));
+  if (assignType === "hr_company" && !hrCompanyId) missing.push(t("clean.assignHr"));
   if (!scheduledAt) missing.push(t("clean.scheduledAt"));
   const canCreate = missing.length === 0;
 
   const createJob = useMutation({
     mutationFn: async () => {
       if (!canCreate) throw new Error(`${t("clean.jobIncomplete")} ${missing.join(", ")}`);
+      const insertData: Record<string, unknown> = {
+        owner_group_id: groupId!,
+        property_id: propertyId,
+        template_id: templateId,
+        scheduled_at: new Date(scheduledAt).toISOString(),
+        status: "pending",
+      };
+      if (assignType === "direct") {
+        insertData.assigned_via = "direct";
+        insertData.assigned_to_user_id = assignee;
+      } else {
+        insertData.assigned_via = "hr_request";
+        insertData.assigned_hr_company_id = hrCompanyId;
+      }
       const { data: job, error } = await supabase
         .from("cleaning_jobs")
-        .insert({
-          owner_group_id: groupId!,
-          property_id: propertyId,
-          template_id: templateId,
-          scheduled_at: new Date(scheduledAt).toISOString(),
-          assigned_to_user_id: assignee,
-          status: "pending",
-        })
+        .insert(insertData as never)
         .select("id")
         .single();
       if (error) throw error;
@@ -195,7 +231,9 @@ function JobsPanel() {
       await qc.invalidateQueries({ queryKey: ["tasks", groupId] });
       setPropertyId("");
       setTemplateId("");
+      setAssignType("direct");
       setAssignee("");
+      setHrCompanyId("");
       setScheduledAt("");
       toast.success(t("clean.jobCreated"));
     },
@@ -274,24 +312,74 @@ function JobsPanel() {
           </Select>
           <p className="text-xs text-muted-foreground">{t("clean.instanceNote")}</p>
         </div>
+        {/* Assign type toggle */}
         <div className="space-y-2">
-          <Label>{t("clean.assignDirect")}</Label>
-          <Select value={assignee} onValueChange={setAssignee}>
-            <SelectTrigger>
-              <SelectValue placeholder={t("clean.assignDirect")} />
-            </SelectTrigger>
-            <SelectContent>
-              {(cleanersQ.data ?? []).map((c) => (
-                <SelectItem key={c.user_id} value={c.user_id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {(cleanersQ.data ?? []).length === 0 && !cleanersQ.isLoading && (
-            <p className="text-xs text-muted-foreground">{t("clean.noCleaners")}</p>
-          )}
+          <Label>{t("clean.assignTo")}</Label>
+          <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+            <button
+              type="button"
+              onClick={() => { setAssignType("direct"); setHrCompanyId(""); }}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                assignType === "direct" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("clean.assignDirect")}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAssignType("hr_company"); setAssignee(""); }}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                assignType === "hr_company" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Building2 className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("clean.assignHr")}
+            </button>
+          </div>
         </div>
+
+        {assignType === "direct" ? (
+          <div className="space-y-2">
+            <Label>{t("clean.assignDirect")}</Label>
+            <Select value={assignee} onValueChange={setAssignee}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("clean.assignTo")} />
+              </SelectTrigger>
+              <SelectContent>
+                {(cleanersQ.data ?? []).map((c) => (
+                  <SelectItem key={c.user_id} value={c.user_id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(cleanersQ.data ?? []).length === 0 && !cleanersQ.isLoading && (
+              <p className="text-xs text-muted-foreground">{t("clean.noCleaners")}</p>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Label>{t("clean.assignHr")}</Label>
+            <Select value={hrCompanyId} onValueChange={setHrCompanyId}>
+              <SelectTrigger>
+                <SelectValue placeholder={t("clean.assignHr")} />
+              </SelectTrigger>
+              <SelectContent>
+                {(hrCompaniesQ.data ?? []).map((h) => (
+                  <SelectItem key={h.userId} value={h.userId}>
+                    {h.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(hrCompaniesQ.data ?? []).length === 0 && !hrCompaniesQ.isLoading && (
+              <p className="text-xs text-muted-foreground">{t("people.companies")}</p>
+            )}
+          </div>
+        )}
         <div className="space-y-2">
           <Label htmlFor="sched">{t("clean.scheduledAt")}</Label>
           <Input

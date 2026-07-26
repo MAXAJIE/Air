@@ -112,6 +112,7 @@ const en = {
   "join.hrTitle": "Join a cleaning company",
   "join.hrBody": "Have a company code as well? Enter it here.",
   "join.skip": "Skip for now",
+  "join.limitReached": "This team has reached its pilot limit for your role.",
 
   "group.title": "Create your group",
   "group.body": "Your properties, team and templates all live inside this group.",
@@ -662,6 +663,7 @@ const zhHans: Partial<Dict> = {
   "join.hrTitle": "加入清洁公司",
   "join.hrBody": "如果还有公司邀请码，请在这里输入。",
   "join.skip": "暂时跳过",
+  "join.limitReached": "该团队的角色上限已满，无法加入。",
 
   "group.title": "创建你的团队",
   "group.body": "房源、团队和清洁模板都归属于这个团队。",

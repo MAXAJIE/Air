@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Building2, Copy, Plus, ShieldCheck, UserRound, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { PageHeader } from "@/components/app-shell";
@@ -21,6 +21,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { randomCode } from "@/lib/files";
 
 export const Route = createFileRoute("/_authenticated/people")({
+  validateSearch: (search: Record<string, unknown>): { code?: string } => ({
+    code: typeof search.code === "string" ? search.code : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "People — Keyward" },
@@ -354,8 +357,18 @@ function OwnerPeople() {
 function MemberPeople() {
   const t = useT();
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const { code: urlCode } = Route.useSearch();
   const { data: profile } = useProfile();
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(urlCode ?? "");
+  const [hrCode, setHrCode] = useState("");
+
+  // If a code was in the URL, clear it so it doesn't stick around
+  useEffect(() => {
+    if (urlCode) {
+      navigate({ to: "/people", replace: true });
+    }
+  }, []);
 
   const hiresQ = useQuery({
     queryKey: ["my-hires", profile?.user_id],
@@ -414,7 +427,33 @@ function MemberPeople() {
       ]);
       toast.success(t("join.joined"));
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+    onError: (e) => {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.toLowerCase().includes("pilot team limit") || msg.toLowerCase().includes("pilot limit")) {
+        toast.error(t("join.limitReached"));
+      } else {
+        toast.error(msg || t("common.error"));
+      }
+    },
+  });
+
+  const joinHr = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc("redeem_hr_invite_code", { p_code: hrCode.trim() });
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      setHrCode("");
+      toast.success(t("join.joined"));
+    },
+    onError: (e) => {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.toLowerCase().includes("pilot team limit") || msg.toLowerCase().includes("pilot limit")) {
+        toast.error(t("join.limitReached"));
+      } else {
+        toast.error(msg || t("common.error"));
+      }
+    },
   });
 
   return (
@@ -470,6 +509,25 @@ function MemberPeople() {
             />
           </div>
           <Button disabled={!code.trim() || join.isPending} onClick={() => join.mutate()}>
+            {t("join.join")}
+          </Button>
+        </section>
+
+        <section className="surface space-y-3 p-5">
+          <div>
+            <h2 className="text-lg">{t("join.hrTitle")}</h2>
+            <p className="text-sm text-muted-foreground">{t("join.hrBody")}</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="join-hr-code">{t("join.code")}</Label>
+            <Input
+              id="join-hr-code"
+              value={hrCode}
+              onChange={(e) => setHrCode(e.target.value.toUpperCase())}
+              className="font-mono uppercase"
+            />
+          </div>
+          <Button disabled={!hrCode.trim() || joinHr.isPending} onClick={() => joinHr.mutate()}>
             {t("join.join")}
           </Button>
         </section>

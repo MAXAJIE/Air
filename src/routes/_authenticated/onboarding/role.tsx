@@ -22,6 +22,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/onboarding/role")({
+  validateSearch: (search: Record<string, unknown>): { next?: string } => ({
+    next: typeof search.next === "string" ? search.next : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Choose your role — Keyward" },
@@ -47,6 +50,7 @@ function RolePage() {
   const queryClient = useQueryClient();
   const { data: user } = useAuthUser();
   const { data: profile, isLoading } = useProfile();
+  const { next } = Route.useSearch();
   const [selected, setSelected] = useState<AppRole | null>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -63,7 +67,16 @@ function RolePage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["profile"] });
       toast.success(t("common.saved"));
-      navigate({ to: "/dashboard", replace: true });
+      // Pass along any pending invite code from sessionStorage
+      const pendingCode = sessionStorage.getItem("pending_invite_code");
+      if (next === "redeem" && pendingCode) {
+        navigate({ to: "/people", search: { code: pendingCode }, replace: true });
+        sessionStorage.removeItem("pending_invite_code");
+      } else if (next === "redeem") {
+        navigate({ to: "/people", replace: true });
+      } else {
+        navigate({ to: "/dashboard", replace: true });
+      }
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : t("common.error")),
   });
