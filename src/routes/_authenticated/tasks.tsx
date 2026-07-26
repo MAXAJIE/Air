@@ -255,6 +255,15 @@ function TasksPage() {
         <TaskDetailDialog
           task={openTask}
           assignee={nameOf(openTask.assigned_to_user_id)}
+          isOwner={isOwner}
+          onApprove={() => {
+            setStatus.mutate({ id: openTask.id, status: "done" });
+            setOpenId(null);
+          }}
+          onReopen={() => {
+            setStatus.mutate({ id: openTask.id, status: "pending" });
+            setOpenId(null);
+          }}
           onClose={() => setOpenId(null)}
         />
       )}
@@ -545,16 +554,23 @@ function CreateTaskDialog({
 function TaskDetailDialog({
   task,
   assignee,
+  isOwner,
+  onApprove,
+  onReopen,
   onClose,
 }: {
   task: {
     id: string;
     title: string;
     description: string | null;
+    status: TaskStatus;
     cleaning_job_id: string | null;
     proof_photo_path: string | null;
   };
   assignee: string;
+  isOwner: boolean;
+  onApprove: () => void;
+  onReopen: () => void;
   onClose: () => void;
 }) {
   const t = useT();
@@ -632,6 +648,21 @@ function TaskDetailDialog({
             )}
           </div>
         </div>
+        {isOwner && (task.status === "submitted" || task.status === "done") && (
+          <DialogFooter>
+            {task.status === "submitted" && (
+              <Button onClick={onApprove}>
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                {t("task.approve")}
+              </Button>
+            )}
+            {task.status === "done" && (
+              <Button variant="outline" onClick={onReopen}>
+                {t("task.reopen")}
+              </Button>
+            )}
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );

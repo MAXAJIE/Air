@@ -61,14 +61,15 @@ const NAV: Record<AppRole, NavItem[]> = {
     { to: "/jobs", labelKey: "nav.jobs", icon: ClipboardList },
     { to: "/people", labelKey: "nav.myHires", icon: Users },
     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
+    { to: "/history", labelKey: "nav.history", icon: ListChecks },
     { to: "/performance", labelKey: "nav.performance", icon: TrendingUp },
     { to: "/profile", labelKey: "nav.profile", icon: User },
   ],
   worker: [
     { to: "/dashboard", labelKey: "nav.dashboard", icon: Gauge },
-    { to: "/shop", labelKey: "nav.shop", icon: ShoppingCart },
     { to: "/people", labelKey: "nav.myHires", icon: Users },
     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
+    { to: "/history", labelKey: "nav.history", icon: ListChecks },
     { to: "/profile", labelKey: "nav.profile", icon: User },
   ],
   hr_company: [

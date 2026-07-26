@@ -1,57 +1,254 @@
-diff --git a/src/routes/_authenticated/dashboard.tsx b/src/routes/_authenticated/dashboard.tsx
---- a/src/routes/_authenticated/dashboard.tsx
-+++ b/src/routes/_authenticated/dashboard.tsx
-@@ -296,45 +296,47 @@
-     },
+diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/src/components/app-shell.tsx air/src/components/app-shell.tsx
+--- air-orig/src/components/app-shell.tsx	2026-07-26 10:57:00.803825746 +0000
++++ air/src/components/app-shell.tsx	2026-07-26 10:58:56.537492524 +0000
+@@ -61,14 +61,15 @@
+     { to: "/jobs", labelKey: "nav.jobs", icon: ClipboardList },
+     { to: "/people", labelKey: "nav.myHires", icon: Users },
+     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
++    { to: "/history", labelKey: "nav.history", icon: ListChecks },
+     { to: "/performance", labelKey: "nav.performance", icon: TrendingUp },
+     { to: "/profile", labelKey: "nav.profile", icon: User },
+   ],
+   worker: [
+     { to: "/dashboard", labelKey: "nav.dashboard", icon: Gauge },
+-    { to: "/shop", labelKey: "nav.shop", icon: ShoppingCart },
+     { to: "/people", labelKey: "nav.myHires", icon: Users },
+     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
++    { to: "/history", labelKey: "nav.history", icon: ListChecks },
+     { to: "/profile", labelKey: "nav.profile", icon: User },
+   ],
+   hr_company: [
+diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/src/i18n/translations.ts air/src/i18n/translations.ts
+--- air-orig/src/i18n/translations.ts	2026-07-26 10:57:00.813138289 +0000
++++ air/src/i18n/translations.ts	2026-07-26 10:59:08.024811514 +0000
+@@ -24,6 +24,7 @@
+   "nav.inbox": "Task inbox",
+   "nav.profile": "Profile",
+   "nav.signOut": "Sign out",
++  "nav.history": "History",
+ 
+   "common.save": "Save",
+   "common.cancel": "Cancel",
+@@ -447,7 +448,7 @@
+ 
+   "profile.account": "Account",
+   "profile.personal": "Personal details",
+-  "profile.encryptedNote": "Encrypted before it is stored. Only you, your group owner and your cleaning company can read it.",
++  "profile.encryptedNote": "Encrypted before it is stored. Only you and your group owner can read it.",
+   "profile.fullName": "Full legal name",
+   "profile.idNumber": "IC / passport number",
+   "profile.phone": "Phone number",
+diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/src/routes/_authenticated/people.tsx air/src/routes/_authenticated/people.tsx
+--- air-orig/src/routes/_authenticated/people.tsx	2026-07-26 10:57:00.821788824 +0000
++++ air/src/routes/_authenticated/people.tsx	2026-07-26 10:59:46.599248151 +0000
+@@ -183,6 +183,19 @@
+     onSuccess: () => qc.invalidateQueries({ queryKey: ["members", groupId] }),
    });
  
-   const jobs = data?.jobs ?? [];
-   const tasks = data?.tasks ?? [];
-+  // Job to do / running / finished are driven off `tasks` so the numbers match
-+  // the Tasks page (cleaning_jobs counts under-reported the real workload).
-+  const todo = tasks.filter((t) => t.status === "pending").length;
-+  const running = tasks.filter((t) => t.status === "in_progress").length;
-+  const finished = tasks.filter(
-+    (t) => t.status === "submitted" || t.status === "done" || t.status === "reviewed",
-+  ).length;
--  const todo = jobs.filter((j) => j.status === "pending").length;
--  const running = jobs.filter((j) => j.status === "in_progress").length;
--  const finished = jobs.filter((j) => j.status === "submitted" || j.status === "reviewed").length;
--  const openTasks = tasks.filter((task) => task.status !== "done").length;
- 
-   const buckets: Bucket[] = (["pending", "in_progress", "submitted", "reviewed"] as const)
-     .map((status) => ({
-       name: t(`clean.status.${status}` as TranslationKey),
-       value: jobs.filter((j) => j.status === status).length,
-     }))
-     .filter((bucket) => bucket.value > 0);
- 
-   // Cleaners see their own work only — never a property record they can open.
-   const activity: ActivityRow[] = [
-     ...jobs.slice(0, 6).map((job) => ({
-       id: `job-${job.id}`,
-       title: t("dash.jobEntry"),
-       meta: `${t(`clean.status.${job.status}` as TranslationKey)} · ${shortDate(job.scheduled_at ?? job.created_at)}`,
-     })),
-     ...tasks.slice(0, 6).map((task) => ({
-       id: `task-${task.id}`,
-       title: task.title,
-       meta: `${t(TASK_STATUS_KEY[task.status] ?? "task.pending")} · ${shortDate(task.due_at ?? task.created_at)}`,
-     })),
-   ];
- 
++  // Owner-only: kick a cleaning company from this group.
++  const removeCompany = useMutation({
++    mutationFn: async (hrUserId: string) => {
++      const { error } = await supabase.rpc("kick_hr_company", {
++        p_group_id: groupId!,
++        p_hr_user_id: hrUserId,
++      });
++      if (error) throw error;
++    },
++    onSuccess: () => qc.invalidateQueries({ queryKey: ["hr-affiliations", groupId] }),
++    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
++  });
++
+   const setSelfRole = useMutation({
+     mutationFn: async (value: string) => {
+       const { error } = await supabase
+@@ -245,6 +258,8 @@
+           count={counts.hr_company}
+           cap={CAPS.hr_company}
+           people={companies}
++          onRemove={(userId) => removeCompany.mutate(userId)}
++          removeMode="userId"
+           icon="shield"
+         />
+       </div>
+@@ -379,7 +394,8 @@
+           since: m.created_at,
+           groupName: g?.name ?? m.owner_group_id.slice(0, 8),
+           ownerName: o?.display_name || o?.username || "—",
+-          ownerEmail: o?.email ?? "",
++          // Workers/cleaners intentionally do not see their boss's email.
++          ownerEmail: "",
+         };
+       });
+     },
+@@ -424,7 +440,6 @@
+                   <span className="block truncate text-sm font-medium">{h.groupName}</span>
+                   <span className="block truncate text-xs text-muted-foreground">
+                     {h.ownerName}
+-                    {h.ownerEmail ? ` · ${h.ownerEmail}` : ""}
+                   </span>
+                 </span>
+                 <span className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">
+@@ -475,11 +490,13 @@
+   count: number;
+   cap: number;
+   people: Person[];
+-  onRemove?: (membershipId: string) => void;
++  onRemove?: (idOrUser: string) => void;
++  removeMode?: "membership" | "userId";
+   icon?: "user" | "shield";
+ }) {
+   const t = useT();
+   const Icon = icon === "shield" ? ShieldCheck : UserRound;
++  const mode = removeMode ?? "membership";
    return (
-     <>
--      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-         <StatCard label={t("dash.jobsToDo")} value={todo} icon={ClipboardList} />
-         <StatCard label={t("dash.jobsRunning")} value={running} icon={Sparkle} />
-         <StatCard label={t("dash.jobsDone")} value={finished} icon={CheckCircle2} />
--        <StatCard label={t("dash.myTasks")} value={openTasks} icon={ListChecks} />
-       </div>
-       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-         <CountBars title={t("dash.myJobLoad")} data={buckets} />
-         <ActivityList rows={activity} />
-       </div>
-     </>
+     <section className="surface space-y-3 p-5">
+       <header className="flex items-baseline justify-between gap-2">
+@@ -501,13 +518,13 @@
+               <span className="block truncate text-sm font-medium">{p.name}</span>
+               <span className="block truncate text-xs text-muted-foreground">{p.sub}</span>
+             </span>
+-            {onRemove && p.membershipId && (
++            {onRemove && (mode === "userId" ? p.userId : p.membershipId) && (
+               <Button
+                 size="icon"
+                 variant="ghost"
+                 className="h-8 w-8 shrink-0"
+                 aria-label={t("people.removeMember")}
+-                onClick={() => onRemove(p.membershipId!)}
++                onClick={() => onRemove(mode === "userId" ? p.userId : p.membershipId!)}
+               >
+                 <X className="h-4 w-4" aria-hidden="true" />
+               </Button>
+diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/src/routes/_authenticated/tasks.tsx air/src/routes/_authenticated/tasks.tsx
+--- air-orig/src/routes/_authenticated/tasks.tsx	2026-07-26 10:57:00.822718503 +0000
++++ air/src/routes/_authenticated/tasks.tsx	2026-07-26 10:59:56.193156300 +0000
+@@ -255,6 +255,15 @@
+         <TaskDetailDialog
+           task={openTask}
+           assignee={nameOf(openTask.assigned_to_user_id)}
++          isOwner={isOwner}
++          onApprove={() => {
++            setStatus.mutate({ id: openTask.id, status: "done" });
++            setOpenId(null);
++          }}
++          onReopen={() => {
++            setStatus.mutate({ id: openTask.id, status: "pending" });
++            setOpenId(null);
++          }}
+           onClose={() => setOpenId(null)}
+         />
+       )}
+@@ -545,16 +554,23 @@
+ function TaskDetailDialog({
+   task,
+   assignee,
++  isOwner,
++  onApprove,
++  onReopen,
+   onClose,
+ }: {
+   task: {
+     id: string;
+     title: string;
+     description: string | null;
++    status: TaskStatus;
+     cleaning_job_id: string | null;
+     proof_photo_path: string | null;
+   };
+   assignee: string;
++  isOwner: boolean;
++  onApprove: () => void;
++  onReopen: () => void;
+   onClose: () => void;
+ }) {
+   const t = useT();
+@@ -632,6 +648,21 @@
+             )}
+           </div>
+         </div>
++        {isOwner && (task.status === "submitted" || task.status === "done") && (
++          <DialogFooter>
++            {task.status === "submitted" && (
++              <Button onClick={onApprove}>
++                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
++                {t("task.approve")}
++              </Button>
++            )}
++            {task.status === "done" && (
++              <Button variant="outline" onClick={onReopen}>
++                {t("task.reopen")}
++              </Button>
++            )}
++          </DialogFooter>
++        )}
+       </DialogContent>
+     </Dialog>
    );
+diff -urN '--exclude=node_modules' '--exclude=.git' air-orig/supabase/migrations/20260729000000_air_v4_completions_and_username.sql air/supabase/migrations/20260729000000_air_v4_completions_and_username.sql
+--- air-orig/supabase/migrations/20260729000000_air_v4_completions_and_username.sql	1970-01-01 00:00:00.000000000 +0000
++++ air/supabase/migrations/20260729000000_air_v4_completions_and_username.sql	2026-07-26 10:59:19.826767423 +0000
+@@ -0,0 +1,63 @@
++-- Air v4:
++--  * Reliable username -> email lookup for sign-in (reads auth.users, so it
++--    still works when public.profiles.email is blank).
++--  * Permanent record of task submissions so the "Finished jobs" counter on
++--    a cleaner/worker dashboard does not fall when an owner reopens a task.
++
++create or replace function public.email_for_username(p_username text)
++returns text
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select coalesce(u.email, p.email)
++  from public.profiles p
++  left join auth.users u on u.id = p.user_id
++  where lower(p.username) = lower(trim(p_username))
++     or lower(p.display_name) = lower(trim(p_username))
++  order by (lower(p.username) = lower(trim(p_username))) desc
++  limit 1
++$$;
++
++revoke all on function public.email_for_username(text) from public;
++grant execute on function public.email_for_username(text) to anon, authenticated;
++
++-- Immutable audit of every submission. One row per submit, never deleted when
++-- an owner reopens a task, so the counter can only ever go up.
++create table if not exists public.task_completion_events (
++  id uuid primary key default gen_random_uuid(),
++  task_id uuid not null,
++  user_id uuid not null,
++  owner_group_id uuid,
++  submitted_at timestamptz not null default now()
++);
++create index if not exists task_completion_events_user_idx
++  on public.task_completion_events(user_id);
++
++grant select on public.task_completion_events to authenticated;
++grant all on public.task_completion_events to service_role;
++
++alter table public.task_completion_events enable row level security;
++
++drop policy if exists "own completions readable" on public.task_completion_events;
++create policy "own completions readable"
++  on public.task_completion_events
++  for select
++  to authenticated
++  using (user_id = auth.uid());
++
++create or replace function public.log_task_submission()
++returns trigger language plpgsql security definer set search_path = public as $$
++begin
++  if NEW.status = 'submitted' and (OLD.status is distinct from 'submitted') then
++    insert into public.task_completion_events(task_id, user_id, owner_group_id, submitted_at)
++    values (NEW.id, coalesce(NEW.assigned_to_user_id, auth.uid()), NEW.owner_group_id, now());
++  end if;
++  return NEW;
++end; $$;
++
++drop trigger if exists tasks_log_submission on public.tasks;
++create trigger tasks_log_submission
++  after update of status on public.tasks
++  for each row execute function public.log_task_submission();
+\ No newline at end of file

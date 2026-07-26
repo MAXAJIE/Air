@@ -183,6 +183,19 @@ function OwnerPeople() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["members", groupId] }),
   });
 
+  // Owner-only: kick a cleaning company from this group.
+  const removeCompany = useMutation({
+    mutationFn: async (hrUserId: string) => {
+      const { error } = await supabase.rpc("kick_hr_company", {
+        p_group_id: groupId!,
+        p_hr_user_id: hrUserId,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["hr-affiliations", groupId] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
   const setSelfRole = useMutation({
     mutationFn: async (value: string) => {
       const { error } = await supabase
@@ -245,6 +258,8 @@ function OwnerPeople() {
           count={counts.hr_company}
           cap={CAPS.hr_company}
           people={companies}
+          onRemove={(userId) => removeCompany.mutate(userId)}
+          removeMode="userId"
           icon="shield"
         />
       </div>
@@ -379,7 +394,8 @@ function MemberPeople() {
           since: m.created_at,
           groupName: g?.name ?? m.owner_group_id.slice(0, 8),
           ownerName: o?.display_name || o?.username || "—",
-          ownerEmail: o?.email ?? "",
+          // Workers/cleaners intentionally do not see their boss's email.
+          ownerEmail: "",
         };
       });
     },
@@ -424,7 +440,6 @@ function MemberPeople() {
                   <span className="block truncate text-sm font-medium">{h.groupName}</span>
                   <span className="block truncate text-xs text-muted-foreground">
                     {h.ownerName}
-                    {h.ownerEmail ? ` · ${h.ownerEmail}` : ""}
                   </span>
                 </span>
                 <span className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">
@@ -475,11 +490,13 @@ function RoleColumn({
   count: number;
   cap: number;
   people: Person[];
-  onRemove?: (membershipId: string) => void;
+  onRemove?: (idOrUser: string) => void;
+  removeMode?: "membership" | "userId";
   icon?: "user" | "shield";
 }) {
   const t = useT();
   const Icon = icon === "shield" ? ShieldCheck : UserRound;
+  const mode = removeMode ?? "membership";
   return (
     <section className="surface space-y-3 p-5">
       <header className="flex items-baseline justify-between gap-2">
@@ -501,13 +518,13 @@ function RoleColumn({
               <span className="block truncate text-sm font-medium">{p.name}</span>
               <span className="block truncate text-xs text-muted-foreground">{p.sub}</span>
             </span>
-            {onRemove && p.membershipId && (
+            {onRemove && (mode === "userId" ? p.userId : p.membershipId) && (
               <Button
                 size="icon"
                 variant="ghost"
                 className="h-8 w-8 shrink-0"
                 aria-label={t("people.removeMember")}
-                onClick={() => onRemove(p.membershipId!)}
+                onClick={() => onRemove(mode === "userId" ? p.userId : p.membershipId!)}
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </Button>

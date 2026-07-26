@@ -24,6 +24,7 @@ const en = {
   "nav.inbox": "Task inbox",
   "nav.profile": "Profile",
   "nav.signOut": "Sign out",
+  "nav.history": "History",
 
   "common.save": "Save",
   "common.cancel": "Cancel",
@@ -447,7 +448,7 @@ const en = {
 
   "profile.account": "Account",
   "profile.personal": "Personal details",
-  "profile.encryptedNote": "Encrypted before it is stored. Only you, your group owner and your cleaning company can read it.",
+  "profile.encryptedNote": "Encrypted before it is stored. Only you and your group owner can read it.",
   "profile.fullName": "Full legal name",
   "profile.idNumber": "IC / passport number",
   "profile.phone": "Phone number",
