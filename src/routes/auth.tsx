@@ -68,9 +68,14 @@ function AuthPage() {
     try {
       let loginEmail = identifier.trim();
       if (!loginEmail.includes("@")) {
-        const { data } = await supabase.from("profiles").select("email").eq("username", loginEmail).maybeSingle();
-        if (!data?.email) throw new Error(t("common.error"));
-        loginEmail = data.email;
+        // profiles is not readable by anon; use a SECURITY DEFINER RPC that
+        // returns ONLY the email for the given username.
+        const { data: resolved, error: rpcError } = await supabase.rpc("email_for_username", {
+          p_username: loginEmail,
+        });
+        if (rpcError) throw rpcError;
+        if (!resolved) throw new Error(t("common.error"));
+        loginEmail = String(resolved);
       }
       const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
       if (error) throw error;

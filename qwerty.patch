@@ -1,27 +1,162 @@
---- a/supabase/migrations/20260726140000_air_v2.sql
-+++ b/supabase/migrations/20260726140000_air_v2.sql
-@@ -106,6 +106,24 @@
-   ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
- -- The image now lives in the database, so the legacy storage path is optional.
- ALTER TABLE public.payment_qr_codes ALTER COLUMN qr_image_url DROP NOT NULL;
-+
-+-- A group may already have several rows flagged active (the old schema allowed
-+-- it). Keep only the most recent one active per group so the unique index below
-+-- can be created; the others are retained but deactivated.
-+WITH ranked AS (
-+  SELECT id,
-+         row_number() OVER (
-+           PARTITION BY owner_group_id
-+           ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
-+         ) AS rn
-+    FROM public.payment_qr_codes
-+   WHERE active
-+)
-+UPDATE public.payment_qr_codes q
-+   SET active = false
-+  FROM ranked r
-+ WHERE q.id = r.id AND r.rn > 1;
-+
- CREATE UNIQUE INDEX IF NOT EXISTS payment_qr_active_uidx
-   ON public.payment_qr_codes(owner_group_id) WHERE active;
+diff --git a/src/hooks/use-idle-logout.tsx b/src/hooks/use-idle-logout.tsx
+index aabc8b6..b6d1e83 100644
+--- a/src/hooks/use-idle-logout.tsx
++++ b/src/hooks/use-idle-logout.tsx
+@@ -6,6 +6,7 @@ import { toast } from "sonner";
+ import { useT } from "@/i18n";
+ import {
+   INACTIVITY_TTL_MS,
++  isIdleLogoutHeld,
+   isIdleExpired,
+   readLastActivity,
+   signOutForInactivity,
+@@ -29,6 +30,11 @@ export function useIdleLogout() {
  
+     const expire = async () => {
+       if (firing.current) return;
++      // Never expire while a task hold is active (accepted, not submitted).
++      if (isIdleLogoutHeld()) {
++        schedule();
++        return;
++      }
+       firing.current = true;
+       await signOutForInactivity(queryClient);
+       toast.error(t("auth.idleLogout"));
+@@ -37,6 +43,11 @@ export function useIdleLogout() {
+ 
+     const schedule = () => {
+       if (timer) window.clearTimeout(timer);
++      if (isIdleLogoutHeld()) {
++        // Re-check every 30s while paused; picks up release() promptly.
++        timer = window.setTimeout(schedule, 30_000);
++        return;
++      }
+       const last = readLastActivity() ?? Date.now();
+       const remaining = last + INACTIVITY_TTL_MS - Date.now();
+       if (remaining <= 0) {
+diff --git a/src/lib/session-hygiene.ts b/src/lib/session-hygiene.ts
+index a7a1dea..aefc036 100644
+--- a/src/lib/session-hygiene.ts
++++ b/src/lib/session-hygiene.ts
+@@ -10,6 +10,13 @@ import { supabase } from "@/integrations/supabase/client";
+ export const INACTIVITY_TTL_MS = 15 * 60 * 1000;
+ export const PENDING_VERIFY_KEY = "keyward.pendingVerify";
+ export const LAST_ACTIVE_KEY = "keyward.lastActive";
++/**
++ * Counter of in-progress tasks that should keep the session alive.
++ * While > 0, `isIdleExpired` returns false and the idle logout is paused.
++ * Incremented by `holdIdleLogout` (e.g. on Accept), decremented by
++ * `releaseIdleLogout` (e.g. on Submit / Cancel).
++ */
++export const TASK_HOLD_KEY = "keyward.taskHold";
+ 
+ export type PendingVerify = { email: string; at: number };
+ 
+@@ -36,11 +43,56 @@ export function clearActivity() {
+ 
+ /** True once the last recorded interaction is older than the idle window. */
+ export function isIdleExpired(now: number = Date.now()): boolean {
++  // While the user has at least one accepted, not-yet-submitted task, we
++  // deliberately pause the idle logout. The 15-minute clock only counts
++  // again once every hold has been released.
++  if (readTaskHold() > 0) return false;
+   const last = readLastActivity();
+   if (last === null) return false;
+   return now - last > INACTIVITY_TTL_MS;
+ }
+ 
++function readTaskHold(): number {
++  if (typeof window === "undefined") return 0;
++  const raw = window.localStorage.getItem(TASK_HOLD_KEY);
++  const parsed = raw ? Number(raw) : 0;
++  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
++}
++
++function writeTaskHold(value: number) {
++  if (typeof window === "undefined") return;
++  const clamped = Math.max(0, Math.floor(value));
++  if (clamped === 0) {
++    window.localStorage.removeItem(TASK_HOLD_KEY);
++  } else {
++    window.localStorage.setItem(TASK_HOLD_KEY, String(clamped));
++  }
++}
++
++/** Pause the idle logout while a task is being worked on. Call on Accept. */
++export function holdIdleLogout() {
++  writeTaskHold(readTaskHold() + 1);
++  // Reset the activity clock so that when the hold is released the user
++  // still has a full window before being logged out.
++  touchActivity();
++}
++
++/** Release one pause. Call on Submit / Cancel. Safe to call idempotently. */
++export function releaseIdleLogout() {
++  writeTaskHold(readTaskHold() - 1);
++  touchActivity();
++}
++
++/** True while at least one hold is active. */
++export function isIdleLogoutHeld(): boolean {
++  return readTaskHold() > 0;
++}
++
++/** Clear every hold. Call on hard sign-out so the next session starts clean. */
++export function clearIdleLogoutHolds() {
++  writeTaskHold(0);
++}
++
+ /** Sign out for inactivity: keeps the account, drops only the local session + caches. */
+ export async function signOutForInactivity(queryClient?: QueryClient) {
+   clearActivity();
+diff --git a/src/routes/auth.tsx b/src/routes/auth.tsx
+index 9ab647f..87a82fa 100644
+--- a/src/routes/auth.tsx
++++ b/src/routes/auth.tsx
+@@ -68,9 +68,14 @@ function AuthPage() {
+     try {
+       let loginEmail = identifier.trim();
+       if (!loginEmail.includes("@")) {
+-        const { data } = await supabase.from("profiles").select("email").eq("username", loginEmail).maybeSingle();
+-        if (!data?.email) throw new Error(t("common.error"));
+-        loginEmail = data.email;
++        // profiles is not readable by anon; use a SECURITY DEFINER RPC that
++        // returns ONLY the email for the given username.
++        const { data: resolved, error: rpcError } = await supabase.rpc("email_for_username", {
++          p_username: loginEmail,
++        });
++        if (rpcError) throw rpcError;
++        if (!resolved) throw new Error(t("common.error"));
++        loginEmail = String(resolved);
+       }
+       const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password });
+       if (error) throw error;
+diff --git a/supabase/migrations/20260727000000_auth_username_and_task_hold.sql b/supabase/migrations/20260727000000_auth_username_and_task_hold.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20260727000000_auth_username_and_task_hold.sql
+@@ -0,0 +1,24 @@
++-- Patch 1: allow anon to resolve a username -> email for sign-in, safely.
++-- The profiles table is not readable by anon (by design). Sign-in with a
++-- username requires exactly one lookup: username -> email. Expose it through
++-- a SECURITY DEFINER function that returns only the email, so no other
++-- profile column leaks.
++
++create or replace function public.email_for_username(p_username text)
++returns text
++language sql
++stable
++security definer
++set search_path = public
++as $$
++  select email
++  from public.profiles
++  where lower(username) = lower(p_username)
++  limit 1
++$$;
++
++revoke all on function public.email_for_username(text) from public;
++grant execute on function public.email_for_username(text) to anon, authenticated;
++
++comment on function public.email_for_username(text) is
++  'Resolves a username to its email for sign-in. Returns null when not found. Anon can call it.';

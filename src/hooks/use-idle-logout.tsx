@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useT } from "@/i18n";
 import {
   INACTIVITY_TTL_MS,
+  isIdleLogoutHeld,
   isIdleExpired,
   readLastActivity,
   signOutForInactivity,
@@ -29,6 +30,11 @@ export function useIdleLogout() {
 
     const expire = async () => {
       if (firing.current) return;
+      // Never expire while a task hold is active (accepted, not submitted).
+      if (isIdleLogoutHeld()) {
+        schedule();
+        return;
+      }
       firing.current = true;
       await signOutForInactivity(queryClient);
       toast.error(t("auth.idleLogout"));
@@ -37,6 +43,11 @@ export function useIdleLogout() {
 
     const schedule = () => {
       if (timer) window.clearTimeout(timer);
+      if (isIdleLogoutHeld()) {
+        // Re-check every 30s while paused; picks up release() promptly.
+        timer = window.setTimeout(schedule, 30_000);
+        return;
+      }
       const last = readLastActivity() ?? Date.now();
       const remaining = last + INACTIVITY_TTL_MS - Date.now();
       if (remaining <= 0) {
