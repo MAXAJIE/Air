@@ -65,7 +65,7 @@ export const getGuestContext = createServerFn({ method: "POST" })
       db.from("amenity_definitions").select("id, name, expected_qty").eq("property_id", data.propertyId),
       db
         .from("shopping_items")
-        .select("id, name, price, description")
+        .select("id, name, price, description, photo_path")
         .eq("owner_group_id", property!.owner_group_id)
         .eq("active", true),
       // QR bytes are encrypted at rest; the RPC decrypts for the service role.
@@ -109,7 +109,25 @@ export const getGuestContext = createServerFn({ method: "POST" })
     return {
       propertyName: property!.name,
       amenities: amenities ?? [],
-      catalog: (items ?? []).map((i) => ({ ...i, price: Number(i.price) })),
+      catalog: await Promise.all(
+        (items ?? []).map(async (i) => {
+          // Sign the item photo so the guest (anonymous, no auth) can render it.
+          let photoUrl: string | null = null;
+          if (i.photo_path) {
+            const { data: signed } = await db.storage
+              .from("photos")
+              .createSignedUrl(i.photo_path, 3600);
+            photoUrl = signed?.signedUrl ?? null;
+          }
+          return {
+            id: i.id,
+            name: i.name,
+            description: i.description,
+            price: Number(i.price),
+            photoUrl,
+          };
+        }),
+      ),
       qrUrl,
       qrLabel: qrRow?.label ?? null,
       cleaner,

@@ -68,7 +68,13 @@ type SessionState = {
 };
 
 type AmenityItem = { id: string; name: string; expected_qty: number };
-type CatalogItem = { id: string; name: string; price: number; description: string | null };
+type CatalogItem = {
+  id: string;
+  name: string;
+  price: number;
+  description: string | null;
+  photoUrl: string | null;
+};
 type GuestContext = {
   propertyName: string;
   amenities: AmenityItem[];
@@ -280,7 +286,11 @@ function GuestByCodePage() {
 
     if (contextQ.isError) {
       const msg = contextQ.error instanceof Error ? contextQ.error.message : "";
-      if (msg === "expired") {
+      // requireSession() throws either "expired" (session past TTL) or
+      // "Invalid stay session" (session id from URL doesn't match). Both mean
+      // the guest needs to enter a fresh stay code — route them to the
+      // expired view so the restart CTA is offered.
+      if (msg === "expired" || msg === "Invalid stay session") {
         setView("expired");
       } else {
         setView("error");
@@ -352,6 +362,22 @@ function GuestByCodePage() {
         <div className="surface flex flex-col items-center gap-4 p-6 text-center">
           <HelpCircle className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
           <p className="font-medium">{t("guest.expired")}</p>
+          <Button
+            type="button"
+            onClick={() => {
+              // Drop the stale session id from the URL and re-run the flow
+              // from step 1 so a fresh session is created.
+              navigate({
+                to: "/g/$code",
+                params: { code },
+                search: {},
+                replace: true,
+              });
+              if (typeof window !== "undefined") window.location.reload();
+            }}
+          >
+            {t("guest.enter")}
+          </Button>
         </div>
       </div>
     );
@@ -814,6 +840,15 @@ function ShopView({
             key={item.id}
             className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5"
           >
+            {item.photoUrl && (
+              // eslint-disable-next-line jsx-a11y/alt-text
+              <img
+                src={item.photoUrl}
+                alt={item.name}
+                className="mr-3 h-14 w-14 shrink-0 rounded-md object-cover"
+                loading="lazy"
+              />
+            )}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">{item.name}</span>
               {item.description && (

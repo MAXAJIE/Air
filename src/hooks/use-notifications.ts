@@ -32,6 +32,13 @@ export type AppNotification = {
   payload: NotificationPayload;
   read: boolean;
   created_at: string;
+  /**
+   * Optional pre-computed navigation target (populated by DB triggers or
+   * server code). When present it wins over the client-side derivation
+   * in `notifUrl()` — this is the seam that lets new notification kinds
+   * deep-link without teaching the client a new mapping.
+   */
+  target_url: string | null;
 };
 
 /**
@@ -57,6 +64,7 @@ export const NOTIF_TO_ROUTE: Record<NotificationType, string> = {
  * Derive a notification's navigation URL from its type and payload.
  */
 export function notifUrl(notif: AppNotification): string {
+  if (notif.target_url) return notif.target_url;
   if (notif.payload.url) return notif.payload.url;
   const route = NOTIF_TO_ROUTE[notif.type] ?? "/dashboard";
 
@@ -94,7 +102,7 @@ export function useUnreadNotifications() {
     queryFn: async (): Promise<AppNotification[]> => {
       const { data, error } = await supabase
         .from("notifications")
-        .select("id, type, payload, read, created_at")
+        .select("id, type, payload, read, created_at, target_url")
         .eq("user_id", user!.id)
         .eq("read", false)
         .order("created_at", { ascending: false })

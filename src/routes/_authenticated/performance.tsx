@@ -147,11 +147,15 @@ function CleanerPerformance({ cleanerUserId }: { cleanerUserId: string | null })
         defs = data ?? [];
       }
 
-      // Annotate each check with the definition name
-      const checks = (checksRes.data ?? []).map((c) => ({
-        ...c,
-        definition: defs.find((d) => d.id === c.amenity_definition_id),
-      }));
+      // Annotate each check with its definition, then keep only rows where
+      // the reported quantity actually diverges from what's expected — those
+      // are the "discrepancies" the label promises.
+      const checks = (checksRes.data ?? [])
+        .map((c) => ({
+          ...c,
+          definition: defs.find((d) => d.id === c.amenity_definition_id),
+        }))
+        .filter((c) => !!c.definition && c.actual_qty !== c.definition!.expected_qty);
 
       return {
         ratings: ratingsRes.data ?? [],

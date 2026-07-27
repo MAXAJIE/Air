@@ -24,6 +24,7 @@ import { Route as AuthenticatedPeopleRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedPerformanceRouteImport } from './routes/_authenticated/performance'
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
 import { Route as AuthenticatedRequestsRouteImport } from './routes/_authenticated/requests'
+import { Route as AuthenticatedReviewsRouteImport } from './routes/_authenticated/reviews'
 import { Route as AuthenticatedRosterRouteImport } from './routes/_authenticated/roster'
 import { Route as AuthenticatedShopRouteImport } from './routes/_authenticated/shop'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
@@ -108,6 +109,11 @@ const AuthenticatedRequestsRoute = AuthenticatedRequestsRouteImport.update({
   path: '/requests',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedReviewsRoute = AuthenticatedReviewsRouteImport.update({
+  id: '/reviews',
+  path: '/reviews',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedRosterRoute = AuthenticatedRosterRouteImport.update({
   id: '/roster',
   path: '/roster',
@@ -162,6 +168,7 @@ export interface FileRoutesByFullPath {
   '/performance': typeof AuthenticatedPerformanceRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/requests': typeof AuthenticatedRequestsRoute
+  '/reviews': typeof AuthenticatedReviewsRoute
   '/roster': typeof AuthenticatedRosterRoute
   '/shop': typeof AuthenticatedShopRoute
   '/tasks': typeof AuthenticatedTasksRoute
@@ -185,6 +192,7 @@ export interface FileRoutesByTo {
   '/performance': typeof AuthenticatedPerformanceRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/requests': typeof AuthenticatedRequestsRoute
+  '/reviews': typeof AuthenticatedReviewsRoute
   '/roster': typeof AuthenticatedRosterRoute
   '/shop': typeof AuthenticatedShopRoute
   '/tasks': typeof AuthenticatedTasksRoute
@@ -210,6 +218,7 @@ export interface FileRoutesById {
   '/_authenticated/performance': typeof AuthenticatedPerformanceRoute
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/requests': typeof AuthenticatedRequestsRoute
+  '/_authenticated/reviews': typeof AuthenticatedReviewsRoute
   '/_authenticated/roster': typeof AuthenticatedRosterRoute
   '/_authenticated/shop': typeof AuthenticatedShopRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
@@ -235,6 +244,7 @@ export interface FileRouteTypes {
     | '/performance'
     | '/profile'
     | '/requests'
+    | '/reviews'
     | '/roster'
     | '/shop'
     | '/tasks'
@@ -258,6 +268,7 @@ export interface FileRouteTypes {
     | '/performance'
     | '/profile'
     | '/requests'
+    | '/reviews'
     | '/roster'
     | '/shop'
     | '/tasks'
@@ -282,6 +293,7 @@ export interface FileRouteTypes {
     | '/_authenticated/performance'
     | '/_authenticated/profile'
     | '/_authenticated/requests'
+    | '/_authenticated/reviews'
     | '/_authenticated/roster'
     | '/_authenticated/shop'
     | '/_authenticated/tasks'
@@ -406,6 +418,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRequestsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/reviews': {
+      id: '/_authenticated/reviews'
+      path: '/reviews'
+      fullPath: '/reviews'
+      preLoaderRoute: typeof AuthenticatedReviewsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/roster': {
       id: '/_authenticated/roster'
       path: '/roster'
@@ -470,6 +489,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPerformanceRoute: typeof AuthenticatedPerformanceRoute
   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedRequestsRoute: typeof AuthenticatedRequestsRoute
+  AuthenticatedReviewsRoute: typeof AuthenticatedReviewsRoute
   AuthenticatedRosterRoute: typeof AuthenticatedRosterRoute
   AuthenticatedShopRoute: typeof AuthenticatedShopRoute
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
@@ -490,6 +510,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedPerformanceRoute: AuthenticatedPerformanceRoute,
   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedRequestsRoute: AuthenticatedRequestsRoute,
+  AuthenticatedReviewsRoute: AuthenticatedReviewsRoute,
   AuthenticatedRosterRoute: AuthenticatedRosterRoute,
   AuthenticatedShopRoute: AuthenticatedShopRoute,
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,

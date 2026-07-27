@@ -237,7 +237,7 @@ function AuthPage() {
             <TabsContent value="signup">
               {next === "redeem" && (
                 <div className="surface mt-4 mb-4 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm text-primary">
-                  Have an invite code? Sign up first, then paste it in your account once ready.
+                  {t("auth.inviteHint")}
                 </div>
               )}
               <form onSubmit={handleSignUp} className="surface mt-4 space-y-4 p-6">

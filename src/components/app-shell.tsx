@@ -12,6 +12,7 @@ import {
   LogOut,
   ShoppingCart,
   Sparkle,
+  Star,
   TrendingUp,
   User,
   Users,
@@ -65,6 +66,7 @@ const NAV: Record<AppRole, NavItem[]> = {
     { to: "/shop", labelKey: "nav.shop", icon: ShoppingCart },
     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
     { to: "/performance", labelKey: "nav.performance", icon: TrendingUp },
+    { to: "/reviews", labelKey: "nav.reviews", icon: Star },
     { to: "/profile", labelKey: "nav.profile", icon: User },
   ],
   cleaner: [
@@ -90,6 +92,7 @@ const NAV: Record<AppRole, NavItem[]> = {
     { to: "/roster", labelKey: "nav.roster", icon: Boxes },
     { to: "/agencies", labelKey: "nav.agencies", icon: Handshake },
     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
+    { to: "/reviews", labelKey: "nav.reviews", icon: Star },
     { to: "/profile", labelKey: "nav.profile", icon: User },
   ],
 };
@@ -206,7 +209,7 @@ function NotificationBell({ notifications: items }: { notifications: AppNotifica
                     onClick={() => {
                       markRead.mutate(notif.id);
                       setOpen(false);
-                      navigate({ to: notifUrl(notif) });
+                      window.location.assign(notifUrl(notif));
                     }}
                   >
                     <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />

@@ -44,6 +44,7 @@ function Page() {
         .from("cleaning_jobs")
         .select("id, status, scheduled_at, created_at, assigned_to_user_id, property_id")
         .eq("assigned_hr_company_id", user!.id)
+        .is("assigned_to_user_id", null)
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
@@ -106,14 +107,11 @@ function Page() {
         .update({ assigned_to_user_id: cleanerUserId })
         .eq("id", jobId);
       if (error) throw error;
-
-      // Notify the cleaner that a job was assigned to them
-      const { error: nErr } = await supabase.from("notifications").insert({
-        user_id: cleanerUserId,
-        type: "job_assigned",
-        payload: { jobId, propertyId: job?.property_id ?? null },
-      });
-      if (nErr) throw nErr;
+      // The DB trigger trg_notify_job_assigned (see
+      // supabase/migrations/20260801000000_notification_triggers.sql) inserts
+      // the notification when assigned_to_user_id changes. Client cannot INSERT
+      // into public.notifications directly (no RLS policy) — attempting it
+      // 403s and misreports success as failure.
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["hr-inbox", user?.id] });

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { Building2, Handshake } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -8,7 +8,7 @@ import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useAuthUser } from "@/hooks/use-app";
+import { useAuthUser, useProfile } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -29,6 +29,7 @@ function Page() {
   const t = useT();
   const qc = useQueryClient();
   const { data: user } = useAuthUser();
+  const { data: profile, isLoading: profileLoading } = useProfile();
   const [code, setCode] = useState("");
 
   // HR company's active affiliations with owner groups
@@ -82,6 +83,10 @@ function Page() {
   });
 
   const affiliations = affilQ.data ?? [];
+
+  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   if (affilQ.isLoading) {
     return (

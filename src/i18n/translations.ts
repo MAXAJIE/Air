@@ -25,6 +25,21 @@ const en = {
   "nav.profile": "Profile",
   "nav.signOut": "Sign out",
   "nav.history": "History",
+  "nav.reviews": "Reviews",
+
+  "task.photoRequired": "Photo required",
+  "task.photoDone": "Photo added",
+  "task.photoBlocking": "{n} required photo(s) missing",
+  "task.photoBlockingShort": "Add the required photos before submitting",
+
+  "reviews.title": "Customer reviews",
+  "reviews.subtitle": "Guest ratings by cleaner",
+  "reviews.empty": "No reviews yet.",
+  "reviews.average": "Average",
+  "reviews.count": "Reviews",
+  "reviews.pickCleaner": "Choose a cleaner",
+  "reviews.forProperty": "For",
+  "reviews.on": "on",
 
   "common.save": "Save",
   "common.cancel": "Cancel",
@@ -77,6 +92,7 @@ const en = {
   "auth.updatePassword": "Update password",
   "auth.passwordUpdated": "Password updated. You can sign in now.",
   "auth.checkEmail": "Confirm your email address to finish signing up.",
+  "auth.inviteHint": "Have an invite code? Sign up first, then paste it in your account once you're signed in.",
   "auth.verifyExpired": "Verification link expired after 5 minutes. Sign up again to get a new one.",
   "auth.idleLogout": "Signed out after 15 minutes of inactivity.",
 
@@ -729,6 +745,7 @@ const zhHans: Partial<Dict> = {
   "auth.updatePassword": "更新密码",
   "auth.passwordUpdated": "密码已更新，现在可以登录。",
   "auth.checkEmail": "请确认邮箱以完成注册。",
+  "auth.inviteHint": "有邀请码？请先注册账号，登录后再在账户中粘贴邀请码。",
   "auth.verifyExpired": "验证链接已在 5 分钟后失效，请重新注册获取新链接。",
 
   "auth.usernameTaken": "该用户名已被占用",
@@ -1197,6 +1214,7 @@ const zhHant: Partial<Dict> = {
   "auth.linkSent": "請查看電子郵件中的重設連結。",
   "auth.passwordUpdated": "密碼已更新，現在可以登入。",
   "auth.checkEmail": "請確認電子郵件以完成註冊。",
+  "auth.inviteHint": "有邀請碼嗎？請先註冊帳號，登入後再於帳戶中貼上邀請碼。",
   "auth.usernameTaken": "該使用者名稱已被使用",
   "auth.usernameFree": "使用者名稱可用",
   "auth.noAccount": "還沒有帳號？",

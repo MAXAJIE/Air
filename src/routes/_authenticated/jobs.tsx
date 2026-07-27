@@ -43,6 +43,36 @@ type Task = {
   source: string | null;
 };
 
+type JobItem = {
+  id: string;
+  description: string;
+  is_checked: boolean;
+  photo_url: string | null;
+  sort_order: number;
+  requires_photo: boolean;
+};
+
+/**
+ * Fetch a job's checklist items. Shared between the checklist UI and the
+ * submit-gate so both surfaces read the same cached data (React Query
+ * de-dupes by queryKey — no double network hit).
+ */
+function useJobItems(jobId: string | null) {
+  return useQuery({
+    queryKey: ["job-items", jobId],
+    enabled: !!jobId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cleaning_job_items")
+        .select("id, description, is_checked, photo_url, sort_order, requires_photo")
+        .eq("cleaning_job_id", jobId!)
+        .order("sort_order");
+      if (error) throw error;
+      return (data ?? []) as JobItem[];
+    },
+  });
+}
+
 function useCountdown(dueAt: string | null) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -163,6 +193,16 @@ function TaskCard({
   const [proof, setProof] = useState<string | null>(task.proof_photo_path);
   const [saveProof, setSaveProof] = useState(false);
 
+  // Block submission while any checklist item that requires a photo is
+  // still missing one. The gate applies only during the cleaner's active
+  // pass (status === "in_progress"), matching when photos can be uploaded.
+  const itemsQ = useJobItems(task.cleaning_job_id);
+  const missingRequiredPhotos = (itemsQ.data ?? []).filter(
+    (i) => i.requires_photo && !i.photo_url,
+  );
+  const submitBlocked =
+    task.status === "in_progress" && missingRequiredPhotos.length > 0;
+
   const savePhoto = async (path: string | null) => {
     setProof(path);
     setSaveProof(true);
@@ -233,10 +273,25 @@ function TaskCard({
           </Button>
         )}
         {task.status === "in_progress" && (
-          <Button size="sm" disabled={saveProof} onClick={onSubmit}>
-            <Send className="h-4 w-4" aria-hidden="true" />
-            {t("task.submit")}
-          </Button>
+          <>
+            {submitBlocked && (
+              <span className="w-full text-right text-xs text-amber-600 dark:text-amber-400">
+                {t("task.photoBlocking").replace(
+                  "{n}",
+                  String(missingRequiredPhotos.length),
+                )}
+              </span>
+            )}
+            <Button
+              size="sm"
+              disabled={saveProof || submitBlocked}
+              onClick={onSubmit}
+              title={submitBlocked ? t("task.photoBlockingShort") : undefined}
+            >
+              <Send className="h-4 w-4" aria-hidden="true" />
+              {t("task.submit")}
+            </Button>
+          </>
         )}
         {task.status === "submitted" && (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -252,18 +307,7 @@ function TaskCard({
 function ChecklistPanel({ jobId, readOnly }: { jobId: string; readOnly: boolean }) {
   const t = useT();
   const qc = useQueryClient();
-  const itemsQ = useQuery({
-    queryKey: ["job-items", jobId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("cleaning_job_items")
-        .select("id, description, is_checked, photo_url, sort_order")
-        .eq("cleaning_job_id", jobId)
-        .order("sort_order");
-      if (error) throw error;
-      return data;
-    },
-  });
+  const itemsQ = useJobItems(jobId);
 
   const toggle = useMutation({
     mutationFn: async (item: { id: string; is_checked: boolean }) => {
@@ -305,6 +349,18 @@ function ChecklistPanel({ jobId, readOnly }: { jobId: string; readOnly: boolean 
               }
             />
             <span className="min-w-0 flex-1">{item.description}</span>
+            {item.requires_photo && (
+              <span
+                className={
+                  "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium " +
+                  (item.photo_url
+                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                    : "bg-amber-500/10 text-amber-700 dark:text-amber-400")
+                }
+              >
+                {item.photo_url ? t("task.photoDone") : t("task.photoRequired")}
+              </span>
+            )}
           </label>
           {!readOnly && (
             <div className="mt-2">

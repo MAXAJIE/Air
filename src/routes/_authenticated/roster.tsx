@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { Navigate, createFileRoute } from "@tanstack/react-router";
 import { Copy, Plus, Sparkle, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
-import { useAuthUser } from "@/hooks/use-app";
+import { useAuthUser, useProfile } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { randomCode } from "@/lib/files";
@@ -28,6 +28,7 @@ function Page() {
   const t = useT();
   const qc = useQueryClient();
   const { data: user } = useAuthUser();
+  const { data: profile, isLoading: profileLoading } = useProfile();
 
   // Invite codes for joining this HR company's roster
   const codesQ = useQuery({
@@ -115,6 +116,10 @@ function Page() {
 
   const roster = rosterQ.data ?? [];
   const codes = codesQ.data ?? [];
+
+  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   if (rosterQ.isLoading || codesQ.isLoading) {
     return (

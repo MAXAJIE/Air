@@ -67,11 +67,13 @@ function RolePage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["profile"] });
       toast.success(t("common.saved"));
-      // Pass along any pending invite code from sessionStorage
+      // A pending invite code always wins: the "next=redeem" hint may have
+      // been dropped by the email-confirmation round trip, but the code stashed
+      // in sessionStorage still means the user came in via an invite link.
       const pendingCode = sessionStorage.getItem("pending_invite_code");
-      if (next === "redeem" && pendingCode) {
-        navigate({ to: "/people", search: { code: pendingCode }, replace: true });
+      if (pendingCode) {
         sessionStorage.removeItem("pending_invite_code");
+        navigate({ to: "/people", search: { code: pendingCode }, replace: true });
       } else if (next === "redeem") {
         navigate({ to: "/people", replace: true });
       } else {

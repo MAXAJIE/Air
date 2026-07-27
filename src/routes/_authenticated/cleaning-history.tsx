@@ -188,7 +188,7 @@ function HistoryPreviewDialog({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("cleaning_job_items")
-        .select("id, description, is_checked, photo_url, sort_order")
+        .select("id, description, is_checked, photo_url, sort_order, requires_photo")
         .eq("cleaning_job_id", job.id)
         .order("sort_order");
       if (error) throw error;
@@ -229,9 +229,23 @@ function HistoryPreviewDialog({
           <ol className="space-y-2">
             {(itemsQ.data ?? []).map((item, index) => (
               <li key={item.id} className="rounded-lg border border-border p-3 text-sm">
-                <span className="font-medium">
-                  {index + 1}. {item.description}
-                </span>
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-medium">
+                    {index + 1}. {item.description}
+                  </span>
+                  {item.requires_photo && (
+                    <span
+                      className={
+                        "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium " +
+                        (item.photo_url
+                          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                          : "bg-amber-500/10 text-amber-700 dark:text-amber-400")
+                      }
+                    >
+                      {item.photo_url ? t("task.photoDone") : t("task.photoRequired")}
+                    </span>
+                  )}
+                </div>
                 <div className="mt-1 flex items-center gap-2">
                   <Checkbox checked={item.is_checked} disabled />
                   {item.is_checked && (

@@ -1,517 +1,566 @@
---- a/src/lib/status-colors.ts	2026-07-26 11:09:20.559016075 +0000
-+++ b/src/lib/status-colors.ts	2026-07-26 11:09:33.015733519 +0000
-@@ -1,3 +1,4 @@
-+import type React from "react";
- /**
-  * Status colours live as semantic utilities in styles.css (`status-chip-*`).
-  * Components never hardcode colour values — they map a status to a palette key.
-@@ -12,12 +13,14 @@
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/components/app-shell.tsx air-work/src/components/app-shell.tsx
+--- a/src/components/app-shell.tsx	2026-07-27 13:00:41.938259432 +0000
++++ b/src/components/app-shell.tsx	2026-07-27 13:06:36.345961911 +0000
+@@ -209,7 +209,7 @@
+                     onClick={() => {
+                       markRead.mutate(notif.id);
+                       setOpen(false);
+-                      navigate({ to: notifUrl(notif) });
++                      window.location.assign(notifUrl(notif));
+                     }}
+                   >
+                     <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/integrations/supabase/types.ts air-work/src/integrations/supabase/types.ts
+--- a/src/integrations/supabase/types.ts	2026-07-27 11:54:51.000000000 +0000
++++ b/src/integrations/supabase/types.ts	2026-07-27 13:05:49.523472490 +0000
+@@ -262,6 +262,7 @@
+           id: string
+           is_checked: boolean
+           photo_url: string | null
++          requires_photo: boolean
+           sort_order: number
+         }
+         Insert: {
+@@ -270,6 +271,7 @@
+           id?: string
+           is_checked?: boolean
+           photo_url?: string | null
++          requires_photo?: boolean
+           sort_order?: number
+         }
+         Update: {
+@@ -278,6 +280,7 @@
+           id?: string
+           is_checked?: boolean
+           photo_url?: string | null
++          requires_photo?: boolean
+           sort_order?: number
+         }
+         Relationships: [
+@@ -621,6 +624,7 @@
+           id: string
+           payload: Json
+           read: boolean
++          target_url: string | null
+           type: string
+           user_id: string
+         }
+@@ -629,6 +633,7 @@
+           id?: string
+           payload?: Json
+           read?: boolean
++          target_url?: string | null
+           type: string
+           user_id: string
+         }
+@@ -637,6 +642,7 @@
+           id?: string
+           payload?: Json
+           read?: boolean
++          target_url?: string | null
+           type?: string
+           user_id?: string
+         }
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/agencies.tsx air-work/src/routes/_authenticated/agencies.tsx
+--- a/src/routes/_authenticated/agencies.tsx	2026-07-27 13:00:41.950877560 +0000
++++ b/src/routes/_authenticated/agencies.tsx	2026-07-27 13:05:49.523898729 +0000
+@@ -30,9 +30,6 @@
+   const qc = useQueryClient();
+   const { data: user } = useAuthUser();
+   const { data: profile, isLoading: profileLoading } = useProfile();
+-  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
+-    return <Navigate to="/dashboard" replace />;
+-  }
+   const [code, setCode] = useState("");
  
- /** Chip classes for an explicit palette key (falls back to slate). */
- export function statusChipClass(color: string | null | undefined): string {
-+  if (isHexColor(color)) return "status-chip";
-   const key: StatusColor = isStatusColor(color) ? color : "slate";
-   return `status-chip status-chip-${key}`;
- }
+   // HR company's active affiliations with owner groups
+@@ -87,6 +84,10 @@
  
- /** Small round colour swatch, used by the palette picker and list dots. */
- export function statusDotClass(color: string | null | undefined): string {
-+  if (isHexColor(color)) return "inline-block h-4 w-4 rounded-full";
-   const key: StatusColor = isStatusColor(color) ? color : "slate";
-   return `status-dot-${key}`;
- }
-@@ -42,3 +45,45 @@
- export function jobStatusChipClass(status: string | null | undefined): string {
-   return statusChipClass(jobStatusColor(status));
- }
+   const affiliations = affilQ.data ?? [];
+ 
++  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
++    return <Navigate to="/dashboard" replace />;
++  }
 +
-+/** True when `color` is a #RRGGBB / #RGB hex value chosen from the color wheel. */
-+export function isHexColor(value: string | null | undefined): value is string {
-+  return !!value && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value);
-+}
+   if (affilQ.isLoading) {
+     return (
+       <>
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/cleaning.tsx air-work/src/routes/_authenticated/cleaning.tsx
+--- a/src/routes/_authenticated/cleaning.tsx	2026-07-27 13:00:41.939595940 +0000
++++ b/src/routes/_authenticated/cleaning.tsx	2026-07-27 13:05:49.523750590 +0000
+@@ -284,14 +284,6 @@
+ 
+   const review = useMutation({
+     mutationFn: async (id: string) => {
+-      // Fetch the job to get the assigned cleaner and HR company before updating
+-      const { data: job, error: fetchErr } = await supabase
+-        .from("cleaning_jobs")
+-        .select("id, assigned_to_user_id, assigned_hr_company_id, property_id")
+-        .eq("id", id)
+-        .single();
+-      if (fetchErr) throw fetchErr;
+-
+       // Mark the cleaning job as reviewed
+       const { error } = await supabase.from("cleaning_jobs").update({ status: "reviewed" }).eq("id", id);
+       if (error) throw error;
+@@ -302,25 +294,10 @@
+         .update({ status: "done" })
+         .eq("cleaning_job_id", id);
+       if (tErr) throw tErr;
+-
+-      // Notify the cleaner that their job was reviewed
+-      if (job.assigned_to_user_id) {
+-        const { error: nErr } = await supabase.from("notifications").insert({
+-          user_id: job.assigned_to_user_id,
+-          type: "job_reviewed",
+-          payload: { jobId: id, propertyId: job.property_id },
+-        });
+-        if (nErr) throw nErr;
+-      }
+-      // Notify the HR company that the job was reviewed
+-      if (job.assigned_hr_company_id) {
+-        const { error: nErr } = await supabase.from("notifications").insert({
+-          user_id: job.assigned_hr_company_id,
+-          type: "hr_job_reviewed",
+-          payload: { jobId: id, propertyId: job.property_id },
+-        });
+-        if (nErr) throw nErr;
+-      }
++      // Review notifications are emitted by the DB trigger
++      // trg_notify_job_reviewed. Client-side INSERTs into public.notifications
++      // are intentionally blocked by RLS and would make a successful review look
++      // like a failed schedule/review action.
+     },
+     onSuccess: async () => {
+       await qc.invalidateQueries({ queryKey: ["jobs", groupId] });
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/dashboard.tsx air-work/src/routes/_authenticated/dashboard.tsx
+--- a/src/routes/_authenticated/dashboard.tsx	2026-07-27 11:54:51.000000000 +0000
++++ b/src/routes/_authenticated/dashboard.tsx	2026-07-27 13:05:49.523637476 +0000
+@@ -210,18 +210,6 @@
+     },
+   });
+ 
+-  if (isLoading) {
+-    return (
+-      <>
+-        <StatsSkeleton count={4} />
+-        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+-          <ListSkeleton rows={4} />
+-          <ListSkeleton rows={5} />
+-        </div>
+-      </>
+-    );
+-  }
+-
+   const stats = useMemo(() => {
+     const properties = data?.properties ?? [];
+     const statusById = new Map((data?.statuses ?? []).map((s) => [s.id, s.label]));
+@@ -260,6 +248,18 @@
+     }));
+   }, [data, t]);
+ 
++  if (isLoading) {
++    return (
++      <>
++        <StatsSkeleton count={4} />
++        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
++          <ListSkeleton rows={4} />
++          <ListSkeleton rows={5} />
++        </div>
++      </>
++    );
++  }
 +
-+/**
-+ * Inline styles for a status chip when the color is an arbitrary hex value.
-+ * Returns an empty object for palette-key colors (styles.css utilities apply).
-+ */
-+export function statusChipStyle(color: string | null | undefined): React.CSSProperties {
-+  if (!isHexColor(color)) return {};
-+  return {
-+    backgroundColor: color!,
-+    color: readableTextOn(color!),
-+    borderColor: "transparent",
-+  };
-+}
-+
-+/** Inline style for a status dot when the color is an arbitrary hex value. */
-+export function statusDotStyle(color: string | null | undefined): React.CSSProperties {
-+  if (!isHexColor(color)) return {};
-+  return { backgroundColor: color! };
-+}
-+
-+/** Pick black/white text for adequate contrast on the supplied hex background. */
-+function readableTextOn(hex: string): string {
-+  const h = hex.replace("#", "");
-+  const full =
-+    h.length === 3
-+      ? h
-+          .split("")
-+          .map((c) => c + c)
-+          .join("")
-+      : h;
-+  const r = parseInt(full.slice(0, 2), 16);
-+  const g = parseInt(full.slice(2, 4), 16);
-+  const b = parseInt(full.slice(4, 6), 16);
-+  // Rec. 601 luma.
-+  const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-+  return luma > 0.6 ? "#111827" : "#ffffff";
-+}
---- a/src/routes/_authenticated/properties.index.tsx	2026-07-26 11:09:20.574816858 +0000
-+++ b/src/routes/_authenticated/properties.index.tsx	2026-07-26 11:11:20.009871838 +0000
-@@ -1,7 +1,7 @@
- import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
- import { createFileRoute, Link } from "@tanstack/react-router";
--import { ExternalLink, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
--import { useState } from "react";
-+import { ExternalLink, Filter, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
-+import { useMemo, useState } from "react";
- import { toast } from "sonner";
- 
- import { AddressPicker, type PlaceValue } from "@/components/address-picker";
-@@ -31,7 +31,14 @@
- import { useT } from "@/i18n";
- import { supabase } from "@/integrations/supabase/client";
- import { randomCode } from "@/lib/files";
--import { statusChipClass } from "@/lib/status-colors";
-+import { statusChipClass, statusChipStyle } from "@/lib/status-colors";
-+import {
-+  Select,
-+  SelectContent,
-+  SelectItem,
-+  SelectTrigger,
-+  SelectValue,
-+} from "@/components/ui/select";
- 
- export const Route = createFileRoute("/_authenticated/properties/")({
-   head: () => ({
-@@ -69,6 +76,8 @@
-   const [place, setPlace] = useState<PlaceValue>(EMPTY_PLACE);
-   const [photoPath, setPhotoPath] = useState<string | null>(null);
-   const [edit, setEdit] = useState<EditState | null>(null);
-+  // "" = All, "none" = Unassigned, else the status id
-+  const [statusFilter, setStatusFilter] = useState<string>("");
- 
-   const setViewMode = (v: ViewMode) => {
-     setView(v);
-@@ -174,6 +183,13 @@
- 
-   type PropertyRow = NonNullable<typeof properties>[number];
- 
-+  const filtered = useMemo<PropertyRow[]>(() => {
-+    const rows = properties ?? [];
-+    if (!statusFilter) return rows;
-+    if (statusFilter === "none") return rows.filter((r) => !r.status_id);
-+    return rows.filter((r) => r.status_id === statusFilter);
-+  }, [properties, statusFilter]);
-+
-   const startEdit = (p: PropertyRow) =>
-     setEdit({
-       id: p.id,
-@@ -235,6 +251,23 @@
-         title={t("prop.title")}
-         action={
-           <div className="flex items-center gap-2">
-+            <div className="hidden sm:flex items-center gap-1 text-muted-foreground">
-+              <Filter className="h-4 w-4" aria-hidden="true" />
-+            </div>
-+            <Select value={statusFilter || "__all"} onValueChange={(v) => setStatusFilter(v === "__all" ? "" : v)}>
-+              <SelectTrigger className="h-8 w-[9rem]">
-+                <SelectValue />
-+              </SelectTrigger>
-+              <SelectContent>
-+                <SelectItem value="__all">All</SelectItem>
-+                <SelectItem value="none">{t("common.unassigned")}</SelectItem>
-+                {(statuses ?? []).map((s) => (
-+                  <SelectItem key={s.id} value={s.id}>
-+                    {s.label}
-+                  </SelectItem>
-+                ))}
-+              </SelectContent>
-+            </Select>
-             <ViewToggle view={view} onView={setViewMode} size={size} onSize={setCardSize} />
-             <Dialog open={open} onOpenChange={setOpen}>
-               <DialogTrigger asChild>
-@@ -279,9 +312,11 @@
-         </div>
-       ) : (properties ?? []).length === 0 ? (
-         <EmptyState />
-+      ) : filtered.length === 0 ? (
-+        <EmptyState />
-       ) : view === "list" ? (
-         <ul className="surface divide-y divide-border">
--          {properties!.map((p) => (
-+          {filtered.map((p) => (
-             <li key={p.id} className="flex items-center gap-1 pr-2 transition-colors hover:bg-accent">
-               <Link
-                 to="/properties/$propertyId"
-@@ -299,7 +334,10 @@
-                   <span className="block truncate font-medium">{p.name}</span>
-                   <span className="block truncate text-xs text-muted-foreground">{p.address ?? "—"}</span>
-                 </span>
--                <span className={`hidden shrink-0 sm:inline-flex ${statusChipClass(statusColor(p.status_id))}`}>
-+                <span
-+                  className={`hidden shrink-0 sm:inline-flex ${statusChipClass(statusColor(p.status_id))}`}
-+                  style={statusChipStyle(statusColor(p.status_id))}
-+                >
-                   {statusLabel(p.status_id)}
-                 </span>
-                 <span className="hidden shrink-0 font-mono text-xs text-muted-foreground md:inline">
-@@ -312,12 +350,18 @@
-         </ul>
-       ) : (
-         <div className={GRID_COLS[size]}>
--          {properties!.map((p) => (
-+          {filtered.map((p) => (
-             <div
-               key={p.id}
-               className="surface overflow-hidden transition-shadow hover:shadow-[var(--shadow-lift)]"
-             >
--              <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="block">
-+              <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="relative block">
-+                <span
-+                  className={`absolute left-2 top-2 z-10 ${statusChipClass(statusColor(p.status_id))}`}
-+                  style={statusChipStyle(statusColor(p.status_id))}
-+                >
-+                  {statusLabel(p.status_id)}
-+                </span>
-                 {p.photo_path ? (
-                   <SignedPhoto
-                     path={p.photo_path}
-@@ -333,10 +377,7 @@
-                   <p className="truncate font-display text-base font-semibold">{p.name}</p>
-                   <p className="mt-1 truncate text-xs text-muted-foreground">{p.address ?? "—"}</p>
-                   {size !== "sm" && (
--                    <div className="mt-3 flex items-center justify-between gap-2 text-xs">
--                      <span className={statusChipClass(statusColor(p.status_id))}>
--                        {statusLabel(p.status_id)}
--                      </span>
-+                    <div className="mt-3 flex items-center justify-end gap-2 text-xs">
-                       <span className="font-mono text-muted-foreground">{p.access_code}</span>
-                     </div>
-                   )}
-@@ -387,6 +428,7 @@
-                       className={`${statusChipClass(s.color)} ${
-                         edit.statusId === s.id ? "ring-2 ring-ring" : ""
-                       }`}
-+                      style={statusChipStyle(s.color)}
-                     >
-                       {s.label}
-                     </button>
---- a/src/routes/_authenticated/properties.$propertyId.tsx	2026-07-26 11:09:20.585765784 +0000
-+++ b/src/routes/_authenticated/properties.$propertyId.tsx	2026-07-26 11:11:23.054645966 +0000
-@@ -18,7 +18,7 @@
- import { useActiveGroup, useProfile } from "@/hooks/use-app";
- import { useT } from "@/i18n";
- import { supabase } from "@/integrations/supabase/client";
--import { STATUS_COLORS, statusChipClass, statusDotClass } from "@/lib/status-colors";
-+import { STATUS_COLORS, statusChipClass, statusDotClass, statusDotStyle, isHexColor } from "@/lib/status-colors";
- 
- export const Route = createFileRoute("/_authenticated/properties/$propertyId")({
-   head: () => ({
-@@ -384,6 +384,31 @@
-                       }`}
-                     />
-                   ))}
-+                  <label
-+                    className={`relative inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-full border border-border ${
-+                      isHexColor(s.color) ? "ring-2 ring-ring" : ""
-+                    }`}
-+                    title="Custom colour"
-+                    style={isHexColor(s.color) ? statusDotStyle(s.color) : undefined}
-+                  >
-+                    {!isHexColor(s.color) ? (
-+                      <span
-+                        aria-hidden="true"
-+                        className="pointer-events-none absolute inset-0 rounded-full"
-+                        style={{
-+                          background:
-+                            "conic-gradient(#ef4444,#f59e0b,#eab308,#22c55e,#06b6d4,#3b82f6,#8b5cf6,#ec4899,#ef4444)",
-+                        }}
-+                      />
-+                    ) : null}
-+                    <input
-+                      type="color"
-+                      className="h-6 w-6 cursor-pointer opacity-0"
-+                      value={isHexColor(s.color) ? s.color! : "#3b82f6"}
-+                      onChange={(e) => setStatusColor.mutate({ id: s.id, color: e.target.value })}
-+                      aria-label="Custom colour"
-+                    />
-+                  </label>
-                   <Button
-                     variant="ghost"
-                     size="sm"
---- a/src/routes/_authenticated/dashboard.tsx	2026-07-26 11:09:20.602714207 +0000
-+++ b/src/routes/_authenticated/dashboard.tsx	2026-07-26 11:10:26.261395396 +0000
-@@ -325,7 +325,7 @@
-       title: task.title,
-       meta: `${t(TASK_STATUS_KEY[task.status] ?? "task.pending")} · ${shortDate(task.due_at ?? task.created_at)}`,
-     })),
--  ];
-+  ].slice(0, 8);
- 
    return (
      <>
-@@ -396,7 +396,7 @@
-       title: request.description,
-       meta: `${request.status} · ${shortDate(request.created_at)}`,
-     })),
--  ];
-+  ].slice(0, 8);
- 
-   return (
-     <>
---- /dev/null	2026-07-26 11:06:57.669154923 +0000
-+++ b/src/routes/_authenticated/history.tsx	2026-07-26 11:10:44.295495277 +0000
-@@ -0,0 +1,123 @@
+       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/reviews.tsx air-work/src/routes/_authenticated/reviews.tsx
+--- a/src/routes/_authenticated/reviews.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/routes/_authenticated/reviews.tsx	2026-07-27 13:06:20.260243715 +0000
+@@ -0,0 +1,172 @@
 +import { useQuery } from "@tanstack/react-query";
-+import { createFileRoute, Link } from "@tanstack/react-router";
-+import { ArrowLeft, CheckCircle2, ClipboardList } from "lucide-react";
++import { Navigate, createFileRoute } from "@tanstack/react-router";
++import { Building2, Star, UserRound } from "lucide-react";
 +
-+import { EmptyState, PageHeader } from "@/components/app-shell";
-+import { useProfile } from "@/hooks/use-app";
++import { ListSkeleton, PageHeader, StatCard, StatsSkeleton } from "@/components/app-shell";
++import { useActiveGroup, useProfile } from "@/hooks/use-app";
 +import { useT } from "@/i18n";
 +import { supabase } from "@/integrations/supabase/client";
++import { cn } from "@/lib/utils";
 +
-+export const Route = createFileRoute("/_authenticated/history")({
++export const Route = createFileRoute("/_authenticated/reviews")({
 +  head: () => ({
 +    meta: [
-+      { title: "History — Keyward" },
-+      { name: "description", content: "Every task and cleaning job you have completed." },
-+      { property: "og:title", content: "History — Keyward" },
-+      { property: "og:description", content: "Every task and cleaning job you have completed." },
++      { title: "Reviews — Keyward" },
++      { name: "description", content: "Guest ratings and cleaning feedback." },
++      { property: "og:title", content: "Reviews — Keyward" },
++      { property: "og:description", content: "Guest ratings and cleaning feedback." },
 +      { name: "robots", content: "noindex" },
 +    ],
 +  }),
-+  component: HistoryPage,
++  component: ReviewsPage,
 +});
 +
-+function shortDate(value: string | null | undefined) {
-+  if (!value) return "—";
-+  const d = new Date(value);
-+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
-+}
++type ReviewRow = {
++  id: string;
++  cleaner_user_id: string;
++  cleaning_job_id: string | null;
++  property_id: string;
++  rating: number;
++  comment: string | null;
++  created_at: string;
++};
 +
-+function HistoryPage() {
++function ReviewsPage() {
 +  const t = useT();
-+  const { data: profile } = useProfile();
-+  const userId = profile?.id ?? null;
++  const { groupId } = useActiveGroup();
++  const { data: profile, isLoading: profileLoading } = useProfile();
 +
-+  const eventsQ = useQuery({
-+    queryKey: ["history-completions", userId],
-+    enabled: !!userId,
++  const reviewsQ = useQuery({
++    queryKey: ["reviews", groupId],
++    enabled: !!groupId,
 +    queryFn: async () => {
-+      const { data, error } = await supabase
-+        .from("task_completion_events")
-+        .select("id, task_id, submitted_at")
-+        .eq("user_id", userId!)
-+        .order("submitted_at", { ascending: false })
-+        .limit(500);
-+      if (error) throw error;
-+      return data ?? [];
++      const { data: properties, error: propsError } = await supabase
++        .from("properties")
++        .select("id, name")
++        .eq("owner_group_id", groupId!);
++      if (propsError) throw propsError;
++
++      const propertyIds = (properties ?? []).map((property) => property.id);
++      if (propertyIds.length === 0) {
++        return { reviews: [] as ReviewRow[], properties: properties ?? [], cleaners: [] };
++      }
++
++      const { data: reviews, error: reviewsError } = await supabase
++        .from("cleaner_ratings")
++        .select("id, cleaner_user_id, cleaning_job_id, property_id, rating, comment, created_at")
++        .in("property_id", propertyIds)
++        .order("created_at", { ascending: false });
++      if (reviewsError) throw reviewsError;
++
++      const cleanerIds = Array.from(new Set((reviews ?? []).map((review) => review.cleaner_user_id)));
++      const { data: cleaners } = cleanerIds.length
++        ? await supabase
++            .from("profiles")
++            .select("user_id, display_name, username")
++            .in("user_id", cleanerIds)
++        : { data: [] };
++
++      return {
++        reviews: (reviews ?? []) as ReviewRow[],
++        properties: properties ?? [],
++        cleaners: cleaners ?? [],
++      };
 +    },
 +  });
 +
-+  const taskIds = (eventsQ.data ?? []).map((e) => e.task_id);
-+  const tasksQ = useQuery({
-+    queryKey: ["history-tasks", taskIds.join(",")],
-+    enabled: taskIds.length > 0,
-+    queryFn: async () => {
-+      const { data, error } = await supabase
-+        .from("tasks")
-+        .select("id, title, status, source")
-+        .in("id", taskIds);
-+      if (error) throw error;
-+      return data ?? [];
-+    },
-+  });
++  if (!profileLoading && profile?.primary_role !== "owner" && profile?.primary_role !== "hr_company") {
++    return <Navigate to="/dashboard" replace />;
++  }
 +
-+  const taskById = new Map((tasksQ.data ?? []).map((t) => [t.id, t]));
-+  const events = eventsQ.data ?? [];
-+  const total = events.length;
++  const reviews = reviewsQ.data?.reviews ?? [];
++  const propertyName = (id: string) =>
++    reviewsQ.data?.properties.find((property) => property.id === id)?.name ?? id.slice(0, 8);
++  const cleanerName = (id: string) => {
++    const cleaner = reviewsQ.data?.cleaners.find((person) => person.user_id === id);
++    return cleaner?.display_name || cleaner?.username || id.slice(0, 8);
++  };
++  const cleanerIds = Array.from(new Set(reviews.map((review) => review.cleaner_user_id)));
++  const average = reviews.length
++    ? (reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1)
++    : "—";
 +
 +  return (
 +    <>
-+      <Link
-+        to="/dashboard"
-+        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-+      >
-+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-+        {t("common.back")}
-+      </Link>
-+
-+      <PageHeader
-+        title={t("nav.history")}
-+        description={`${total} ${total === 1 ? "completion" : "completions"}`}
-+      />
-+
-+      {eventsQ.isLoading ? (
-+        <div className="space-y-2">
-+          {[0, 1, 2].map((i) => (
-+            <div key={i} className="h-14 animate-pulse rounded-md bg-muted" />
-+          ))}
++      <PageHeader title={t("reviews.title")} description={t("reviews.subtitle")} />
++      {reviewsQ.isLoading ? (
++        <div className="space-y-6">
++          <StatsSkeleton count={3} />
++          <ListSkeleton rows={6} />
 +        </div>
-+      ) : events.length === 0 ? (
-+        <EmptyState />
 +      ) : (
-+        <ul className="surface divide-y divide-border">
-+          {events.map((ev) => {
-+            const task = taskById.get(ev.task_id);
-+            const isCleaning = task?.source === "cleaning";
-+            return (
-+              <li key={ev.id} className="flex items-center gap-3 p-3">
-+                <span
-+                  className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-+                    isCleaning ? "bg-blue-500/10 text-blue-600" : "bg-emerald-500/10 text-emerald-600"
-+                  }`}
-+                >
-+                  {isCleaning ? (
-+                    <ClipboardList className="h-4 w-4" aria-hidden="true" />
-+                  ) : (
-+                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-+                  )}
-+                </span>
-+                <span className="min-w-0 flex-1">
-+                  <span className="block truncate font-medium">
-+                    {task?.title ?? t("common.unassigned")}
-+                  </span>
-+                  <span className="block truncate text-xs text-muted-foreground">
-+                    {shortDate(ev.submitted_at)}
-+                  </span>
-+                </span>
-+              </li>
-+            );
-+          })}
-+        </ul>
++        <div className="space-y-6">
++          <div className="grid gap-4 sm:grid-cols-3">
++            <StatCard label={t("reviews.average")} value={average} icon={Star} delay={0} />
++            <StatCard label={t("reviews.count")} value={reviews.length} icon={Building2} delay={80} />
++            <StatCard label={t("reviews.pickCleaner")} value={cleanerIds.length} icon={UserRound} delay={160} />
++          </div>
++
++          {cleanerIds.length === 0 ? (
++            <section className="surface p-8 text-center text-sm text-muted-foreground">
++              {t("reviews.empty")}
++            </section>
++          ) : (
++            <div className="grid gap-4 lg:grid-cols-2">
++              {cleanerIds.map((cleanerId, index) => {
++                const cleanerReviews = reviews.filter((review) => review.cleaner_user_id === cleanerId);
++                const cleanerAverage = (
++                  cleanerReviews.reduce((sum, review) => sum + review.rating, 0) / cleanerReviews.length
++                ).toFixed(1);
++                return (
++                  <section
++                    key={cleanerId}
++                    className="surface space-y-4 p-5 animate-card-enter"
++                    style={{ animationDelay: `${index * 50}ms` }}
++                  >
++                    <header className="flex items-start justify-between gap-3">
++                      <div className="min-w-0">
++                        <h2 className="truncate text-lg">{cleanerName(cleanerId)}</h2>
++                        <p className="text-sm text-muted-foreground">
++                          {cleanerReviews.length} {t("reviews.count").toLowerCase()}
++                        </p>
++                      </div>
++                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
++                        <Star className="h-4 w-4 fill-current" aria-hidden="true" />
++                        {cleanerAverage}
++                      </span>
++                    </header>
++
++                    <ul className="divide-y divide-border text-sm">
++                      {cleanerReviews.map((review) => (
++                        <li key={review.id} className="space-y-2 py-3">
++                          <div className="flex items-center justify-between gap-3">
++                            <span className="min-w-0 truncate text-muted-foreground">
++                              {t("reviews.forProperty")} {propertyName(review.property_id)} · {t("reviews.on")} {new Date(review.created_at).toLocaleDateString()}
++                            </span>
++                            <span className="flex shrink-0 items-center gap-0.5">
++                              {Array.from({ length: 5 }, (_, star) => (
++                                <Star
++                                  key={star}
++                                  className={cn(
++                                    "h-3.5 w-3.5",
++                                    star < review.rating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30",
++                                  )}
++                                  aria-hidden="true"
++                                />
++                              ))}
++                            </span>
++                          </div>
++                          {review.comment && <p className="text-foreground">{review.comment}</p>}
++                        </li>
++                      ))}
++                    </ul>
++                  </section>
++                );
++              })}
++            </div>
++          )}
++        </div>
 +      )}
 +    </>
 +  );
 +}
---- /dev/null	2026-07-26 11:06:57.669154923 +0000
-+++ b/src/routes/g.$code.tsx	2026-07-26 11:11:04.908185016 +0000
-@@ -0,0 +1,88 @@
-+import { useQuery } from "@tanstack/react-query";
-+import { createFileRoute, Link } from "@tanstack/react-router";
-+import { MapPin } from "lucide-react";
+\ No newline at end of file
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/roster.tsx air-work/src/routes/_authenticated/roster.tsx
+--- a/src/routes/_authenticated/roster.tsx	2026-07-27 13:00:41.952143967 +0000
++++ b/src/routes/_authenticated/roster.tsx	2026-07-27 13:05:49.523975769 +0000
+@@ -29,9 +29,6 @@
+   const qc = useQueryClient();
+   const { data: user } = useAuthUser();
+   const { data: profile, isLoading: profileLoading } = useProfile();
+-  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
+-    return <Navigate to="/dashboard" replace />;
+-  }
+ 
+   // Invite codes for joining this HR company's roster
+   const codesQ = useQuery({
+@@ -120,6 +117,10 @@
+   const roster = rosterQ.data ?? [];
+   const codes = codesQ.data ?? [];
+ 
++  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
++    return <Navigate to="/dashboard" replace />;
++  }
 +
-+import { supabase } from "@/integrations/supabase/client";
-+import { useT } from "@/i18n";
+   if (rosterQ.isLoading || codesQ.isLoading) {
+     return (
+       <>
+diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/supabase/migrations/20260808000000_remaining_runtime_fixes.sql air-work/supabase/migrations/20260808000000_remaining_runtime_fixes.sql
+--- a/supabase/migrations/20260808000000_remaining_runtime_fixes.sql	1970-01-01 00:00:00.000000000 +0000
++++ b/supabase/migrations/20260808000000_remaining_runtime_fixes.sql	2026-07-27 13:05:49.523556452 +0000
+@@ -0,0 +1,184 @@
++-- Remaining runtime fixes after the bundled 0001-0004 patches.
++-- - Scheduling a direct or HR cleaning job could fail inside notification
++--   triggers because INSERT triggers referenced OLD.
++-- - The frontend already reads notifications.target_url and
++--   cleaning_job_items.requires_photo, so make those schema changes explicit.
++-- - Reviews must be visible to affiliated HR companies without widening public
++--   access to guest comments.
 +
-+export const Route = createFileRoute("/g/$code")({
-+  ssr: false,
-+  head: () => ({
-+    meta: [
-+      { title: "Welcome — Keyward" },
-+      { name: "description", content: "Guest access page." },
-+      { property: "og:title", content: "Welcome — Keyward" },
-+      { property: "og:description", content: "Guest access page." },
-+      { name: "robots", content: "noindex" },
-+    ],
-+  }),
-+  component: GuestByCodePage,
-+});
++ALTER TABLE public.cleaning_job_items
++  ADD COLUMN IF NOT EXISTS requires_photo boolean NOT NULL DEFAULT false;
 +
-+type GuestProperty = {
-+  id: string;
-+  name: string;
-+  address: string | null;
-+  place_name: string | null;
-+  photo_path: string | null;
-+};
++ALTER TABLE public.notifications
++  ADD COLUMN IF NOT EXISTS target_url text;
 +
-+function GuestByCodePage() {
-+  const { code } = Route.useParams();
-+  const t = useT();
++CREATE OR REPLACE FUNCTION public.notification_target_url(p_type text, p_payload jsonb)
++RETURNS text
++LANGUAGE plpgsql
++IMMUTABLE
++SET search_path = public
++AS $$
++DECLARE
++  v_property text := COALESCE(p_payload->>'propertyId', p_payload->>'property_id');
++BEGIN
++  IF p_payload ? 'url' THEN
++    RETURN p_payload->>'url';
++  END IF;
 +
-+  const q = useQuery({
-+    queryKey: ["guest-property", code],
-+    queryFn: async () => {
-+      const { data, error } = await supabase.rpc("guest_property_by_code", { _code: code });
-+      if (error) throw error;
-+      const row = Array.isArray(data) ? data[0] : data;
-+      return (row ?? null) as GuestProperty | null;
-+    },
-+  });
++  IF p_type IN ('special_request') THEN
++    RETURN '/shop?section=requests' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
++  ELSIF p_type IN ('payment_proof') THEN
++    RETURN '/shop?section=shop' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
++  ELSIF p_type IN ('job_submitted', 'amenity_discrepancy') THEN
++    RETURN '/cleaning?tab=jobs' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
++  ELSIF p_type IN ('hr_request', 'hr_job_submitted', 'hr_job_reviewed') THEN
++    RETURN '/inbox';
++  ELSIF p_type IN ('job_assigned', 'job_reviewed') THEN
++    RETURN '/jobs';
++  ELSIF p_type IN ('task_assigned', 'task_submitted', 'task_approved') THEN
++    RETURN '/tasks';
++  END IF;
 +
-+  const property = q.data ?? null;
-+
-+  return (
-+    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-6 px-4 py-10">
-+      <header className="text-center">
-+        <h1 className="font-display text-3xl font-semibold">{t("guest.title")}</h1>
-+        <p className="mt-1 text-sm text-muted-foreground">
-+          {t("guest.codePrompt")}
-+        </p>
-+      </header>
-+
-+      {q.isLoading ? (
-+        <div className="h-40 animate-pulse rounded-md bg-muted" />
-+      ) : !property ? (
-+        <div className="surface p-6 text-center">
-+          <p className="font-medium">{t("guest.badCode")}</p>
-+          <p className="mt-1 text-xs text-muted-foreground">
-+            <span className="font-mono">{code}</span>
-+          </p>
-+          <Link
-+            to="/"
-+            className="mt-4 inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent"
-+          >
-+            {t("common.back")}
-+          </Link>
-+        </div>
-+      ) : (
-+        <section className="surface overflow-hidden">
-+          <div className="flex h-40 w-full items-center justify-center bg-muted">
-+            <MapPin className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
-+          </div>
-+          <div className="p-4">
-+            <h2 className="font-display text-xl font-semibold">{property.name}</h2>
-+            <p className="mt-1 text-sm text-muted-foreground">
-+              {property.address ?? property.place_name ?? "—"}
-+            </p>
-+            <p className="mt-3 font-mono text-xs text-muted-foreground">
-+              {code}
-+            </p>
-+          </div>
-+        </section>
-+      )}
-+    </div>
-+  );
-+}
---- /dev/null	2026-07-26 11:06:57.669154923 +0000
-+++ b/supabase/migrations/20260730000000_air_v5_guest_and_status.sql	2026-07-26 11:10:54.673083315 +0000
-@@ -0,0 +1,25 @@
-+-- Guest access: /g/{access_code} is a public shareable link. Anon has no
-+-- SELECT on public.properties (rows contain owner-scoped data), so expose a
-+-- narrow security-definer RPC returning only the fields the guest page needs.
-+
-+create or replace function public.guest_property_by_code(_code text)
-+returns table (
-+  id uuid,
-+  name text,
-+  address text,
-+  place_name text,
-+  photo_path text
-+)
-+language sql
-+stable
-+security definer
-+set search_path = public
-+as $$
-+  select p.id, p.name, p.address, p.place_name, p.photo_path
-+  from public.properties p
-+  where p.access_code = _code
-+  limit 1
++  RETURN NULL;
++END;
 +$$;
 +
-+revoke all on function public.guest_property_by_code(text) from public;
-+grant execute on function public.guest_property_by_code(text) to anon, authenticated;
++CREATE OR REPLACE FUNCTION public.notify_user(
++  p_user_id uuid,
++  p_type text,
++  p_payload jsonb
++) RETURNS void
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public
++AS $$
++BEGIN
++  INSERT INTO public.notifications(user_id, type, payload, target_url)
++  VALUES (p_user_id, p_type, p_payload, public.notification_target_url(p_type, p_payload));
++END;
++$$;
++
++CREATE OR REPLACE FUNCTION public.notify_job_assigned()
++RETURNS trigger
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public
++AS $$
++BEGIN
++  IF NEW.assigned_to_user_id IS NOT NULL
++     AND (TG_OP = 'INSERT' OR OLD.assigned_to_user_id IS DISTINCT FROM NEW.assigned_to_user_id) THEN
++    PERFORM public.notify_user(
++      NEW.assigned_to_user_id,
++      'job_assigned',
++      jsonb_build_object('jobId', NEW.id, 'propertyId', NEW.property_id)
++    );
++  END IF;
++  RETURN NEW;
++END;
++$$;
++
++CREATE OR REPLACE FUNCTION public.notify_hr_request()
++RETURNS trigger
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public
++AS $$
++BEGIN
++  IF NEW.assigned_via = 'hr_request'
++     AND NEW.assigned_hr_company_id IS NOT NULL
++     AND (
++       TG_OP = 'INSERT'
++       OR OLD.assigned_via IS DISTINCT FROM 'hr_request'
++       OR OLD.assigned_hr_company_id IS DISTINCT FROM NEW.assigned_hr_company_id
++     ) THEN
++    PERFORM public.notify_user(
++      NEW.assigned_hr_company_id,
++      'hr_request',
++      jsonb_build_object('jobId', NEW.id, 'propertyId', NEW.property_id)
++    );
++  END IF;
++  RETURN NEW;
++END;
++$$;
++
++CREATE OR REPLACE FUNCTION public.notify_special_request()
++RETURNS trigger
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public
++AS $$
++DECLARE
++  v_owner_id uuid;
++  v_group_id uuid;
++BEGIN
++  SELECT p.owner_group_id INTO v_group_id
++  FROM public.properties p
++  WHERE p.id = NEW.property_id;
++
++  SELECT og.owner_user_id INTO v_owner_id
++  FROM public.owner_groups og
++  WHERE og.id = v_group_id;
++
++  IF v_owner_id IS NOT NULL THEN
++    PERFORM public.notify_user(
++      v_owner_id,
++      'special_request',
++      jsonb_build_object('requestId', NEW.id, 'propertyId', NEW.property_id)
++    );
++  END IF;
++
++  PERFORM public.notify_user(
++    m.user_id,
++    'special_request',
++    jsonb_build_object('requestId', NEW.id, 'propertyId', NEW.property_id)
++  )
++  FROM public.memberships m
++  WHERE m.owner_group_id = v_group_id
++    AND m.role = 'worker'
++    AND m.status = 'active';
++
++  RETURN NEW;
++END;
++$$;
++
++DROP POLICY IF EXISTS "hr reads affiliated ratings" ON public.cleaner_ratings;
++CREATE POLICY "hr reads affiliated ratings" ON public.cleaner_ratings FOR SELECT TO authenticated
++  USING (public.is_hr_affiliated(public.property_group(property_id)));
++
++DROP POLICY IF EXISTS "hr roster profiles are visible" ON public.profiles;
++CREATE POLICY "hr roster profiles are visible" ON public.profiles FOR SELECT TO authenticated
++  USING (
++    EXISTS (
++      SELECT 1
++      FROM public.hr_company_roster r
++      WHERE r.hr_company_user_id = auth.uid()
++        AND r.cleaner_user_id = profiles.user_id
++        AND r.status = 'active'
++    )
++    OR EXISTS (
++      SELECT 1
++      FROM public.hr_company_roster r
++      WHERE r.cleaner_user_id = auth.uid()
++        AND r.hr_company_user_id = profiles.user_id
++        AND r.status = 'active'
++    )
++    OR EXISTS (
++      SELECT 1
++      FROM public.hr_affiliations h
++      JOIN public.owner_groups g ON g.id = h.owner_group_id
++      WHERE h.hr_company_user_id = auth.uid()
++        AND g.owner_user_id = profiles.user_id
++        AND h.status = 'active'
++    )
++    OR EXISTS (
++      SELECT 1
++      FROM public.hr_affiliations h
++      JOIN public.owner_groups g ON g.id = h.owner_group_id
++      WHERE g.owner_user_id = auth.uid()
++        AND h.hr_company_user_id = profiles.user_id
++        AND h.status = 'active'
++    )
++  );
++
++REVOKE ALL ON FUNCTION public.notify_user(uuid, text, jsonb) FROM PUBLIC;
++GRANT EXECUTE ON FUNCTION public.notify_user(uuid, text, jsonb) TO authenticated;
+\ No newline at end of file

@@ -210,18 +210,6 @@ function OwnerDashboard() {
     },
   });
 
-  if (isLoading) {
-    return (
-      <>
-        <StatsSkeleton count={4} />
-        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-          <ListSkeleton rows={4} />
-          <ListSkeleton rows={5} />
-        </div>
-      </>
-    );
-  }
-
   const stats = useMemo(() => {
     const properties = data?.properties ?? [];
     const statusById = new Map((data?.statuses ?? []).map((s) => [s.id, s.label]));
@@ -259,6 +247,18 @@ function OwnerDashboard() {
       to: { propertyId: job.property_id },
     }));
   }, [data, t]);
+
+  if (isLoading) {
+    return (
+      <>
+        <StatsSkeleton count={4} />
+        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+          <ListSkeleton rows={4} />
+          <ListSkeleton rows={5} />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>

@@ -193,7 +193,22 @@ function OwnerPeople() {
         p_group_id: groupId!,
         p_hr_user_id: hrUserId,
       });
-      if (error) throw error;
+      if (error) {
+        // Fallback: on older DBs where the migration 20260728…_air_v3_invites_and_kick
+        // has not been applied, the RPC is missing (PostgREST returns 404).
+        // The `owner manages hr affiliations` RLS policy already lets the
+        // group owner UPDATE the row directly, so degrade gracefully.
+        const looksMissing =
+          (typeof error.code === "string" && error.code === "PGRST202") ||
+          /Could not find the function|not exist|404/i.test(error.message ?? "");
+        if (!looksMissing) throw error;
+        const { error: uErr } = await supabase
+          .from("hr_affiliations")
+          .update({ status: "revoked" })
+          .eq("owner_group_id", groupId!)
+          .eq("hr_company_user_id", hrUserId);
+        if (uErr) throw uErr;
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["hr-affiliations", groupId] }),
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),

@@ -262,6 +262,7 @@ export type Database = {
           id: string
           is_checked: boolean
           photo_url: string | null
+          requires_photo: boolean
           sort_order: number
         }
         Insert: {
@@ -270,6 +271,7 @@ export type Database = {
           id?: string
           is_checked?: boolean
           photo_url?: string | null
+          requires_photo?: boolean
           sort_order?: number
         }
         Update: {
@@ -278,6 +280,7 @@ export type Database = {
           id?: string
           is_checked?: boolean
           photo_url?: string | null
+          requires_photo?: boolean
           sort_order?: number
         }
         Relationships: [
@@ -621,6 +624,7 @@ export type Database = {
           id: string
           payload: Json
           read: boolean
+          target_url: string | null
           type: string
           user_id: string
         }
@@ -629,6 +633,7 @@ export type Database = {
           id?: string
           payload?: Json
           read?: boolean
+          target_url?: string | null
           type: string
           user_id: string
         }
@@ -637,6 +642,7 @@ export type Database = {
           id?: string
           payload?: Json
           read?: boolean
+          target_url?: string | null
           type?: string
           user_id?: string
         }

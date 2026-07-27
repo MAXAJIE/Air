@@ -337,7 +337,7 @@ function CreateTaskDialog({
         if (!propertyIdVal) throw new Error("A property must be selected for cleaning jobs");
         const { data: template, error: tErr } = await supabase
           .from("cleaning_templates")
-          .select("id, name, cleaning_template_items ( description, sort_order )")
+          .select("id, name, cleaning_template_items ( description, sort_order, requires_photo )")
           .eq("id", templateId)
           .single();
         if (tErr) throw tErr;
@@ -358,6 +358,7 @@ function CreateTaskDialog({
         const items = (template?.cleaning_template_items ?? []) as Array<{
           description: string;
           sort_order: number;
+          requires_photo: boolean | null;
         }>;
         if (items.length > 0) {
           const { error: iErr } = await supabase.from("cleaning_job_items").insert(
@@ -366,6 +367,8 @@ function CreateTaskDialog({
               description: it.description,
               sort_order: it.sort_order,
               is_checked: false,
+              // Freeze the template's per-item photo requirement on the job.
+              requires_photo: it.requires_photo ?? false,
             })),
           );
           if (iErr) throw iErr;
@@ -587,7 +590,7 @@ function TaskDetailDialog({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("cleaning_job_items")
-        .select("id, description, is_checked, photo_url, sort_order")
+        .select("id, description, is_checked, photo_url, sort_order, requires_photo")
         .eq("cleaning_job_id", task.cleaning_job_id!)
         .order("sort_order");
       if (error) throw error;
@@ -622,6 +625,18 @@ function TaskDetailDialog({
                     <span className="flex items-center gap-2">
                       <Checkbox checked={item.is_checked} disabled />
                       <span className="min-w-0 truncate">{item.description}</span>
+                      {item.requires_photo && (
+                        <span
+                          className={
+                            "ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium " +
+                            (item.photo_url
+                              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                              : "bg-amber-500/10 text-amber-700 dark:text-amber-400")
+                          }
+                        >
+                          {item.photo_url ? t("task.photoDone") : t("task.photoRequired")}
+                        </span>
+                      )}
                     </span>
                     {item.photo_url && (
                       <SignedPhoto

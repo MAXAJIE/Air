@@ -109,7 +109,7 @@ function toLocalInput(iso: string | null): string {
 async function snapshotTemplate(jobId: string, templateId: string) {
   const { data: items, error } = await supabase
     .from("cleaning_template_items")
-    .select("description, sort_order")
+    .select("description, sort_order, requires_photo")
     .eq("template_id", templateId)
     .order("sort_order");
   if (error) throw error;
@@ -119,6 +119,10 @@ async function snapshotTemplate(jobId: string, templateId: string) {
       cleaning_job_id: jobId,
       description: item.description,
       sort_order: item.sort_order ?? index + 1,
+      // Photo requirement is copied at snapshot time so later template
+      // edits can't retroactively change what a cleaner-in-progress
+      // is being asked to prove.
+      requires_photo: item.requires_photo ?? false,
     })),
   );
   if (insertError) throw insertError;
@@ -258,23 +262,11 @@ function JobsPanel() {
         .single();
       if (error) throw error;
       await snapshotTemplate(job.id, templateId);
-
-      // Notify the assigned cleaner (direct) or HR company (hr_request)
-      if (assignType === "direct" && assignee) {
-        const { error: nErr } = await supabase.from("notifications").insert({
-          user_id: assignee,
-          type: "job_assigned",
-          payload: { jobId: job.id, propertyId },
-        });
-        if (nErr) throw nErr;
-      } else if (assignType === "hr_company" && hrCompanyId) {
-        const { error: nErr } = await supabase.from("notifications").insert({
-          user_id: hrCompanyId,
-          type: "hr_request",
-          payload: { jobId: job.id, propertyId },
-        });
-        if (nErr) throw nErr;
-      }
+      // Notifications are emitted by DB triggers (trg_notify_job_assigned /
+      // trg_notify_hr_request in supabase/migrations/20260801…). Client-side
+      // inserts into public.notifications are blocked by RLS (no INSERT policy
+      // for `authenticated`) and would surface as "Something went wrong" even
+      // though the job itself was created successfully.
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["jobs", groupId] });
@@ -292,14 +284,6 @@ function JobsPanel() {
 
   const review = useMutation({
     mutationFn: async (id: string) => {
-      // Fetch the job to get the assigned cleaner and HR company before updating
-      const { data: job, error: fetchErr } = await supabase
-        .from("cleaning_jobs")
-        .select("id, assigned_to_user_id, assigned_hr_company_id, property_id")
-        .eq("id", id)
-        .single();
-      if (fetchErr) throw fetchErr;
-
       // Mark the cleaning job as reviewed
       const { error } = await supabase.from("cleaning_jobs").update({ status: "reviewed" }).eq("id", id);
       if (error) throw error;
@@ -310,25 +294,10 @@ function JobsPanel() {
         .update({ status: "done" })
         .eq("cleaning_job_id", id);
       if (tErr) throw tErr;
-
-      // Notify the cleaner that their job was reviewed
-      if (job.assigned_to_user_id) {
-        const { error: nErr } = await supabase.from("notifications").insert({
-          user_id: job.assigned_to_user_id,
-          type: "job_reviewed",
-          payload: { jobId: id, propertyId: job.property_id },
-        });
-        if (nErr) throw nErr;
-      }
-      // Notify the HR company that the job was reviewed
-      if (job.assigned_hr_company_id) {
-        const { error: nErr } = await supabase.from("notifications").insert({
-          user_id: job.assigned_hr_company_id,
-          type: "hr_job_reviewed",
-          payload: { jobId: id, propertyId: job.property_id },
-        });
-        if (nErr) throw nErr;
-      }
+      // Review notifications are emitted by the DB trigger
+      // trg_notify_job_reviewed. Client-side INSERTs into public.notifications
+      // are intentionally blocked by RLS and would make a successful review look
+      // like a failed schedule/review action.
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["jobs", groupId] });
