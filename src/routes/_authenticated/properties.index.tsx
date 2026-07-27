@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { AddressPicker, type PlaceValue } from "@/components/address-picker";
-import { EmptyState, PageHeader } from "@/components/app-shell";
+import { CardGridSkeleton, EmptyState, PageHeader } from "@/components/app-shell";
 import { PhotoPicker } from "@/components/photo-picker";
 import { SignedPhoto } from "@/components/signed-photo";
 import { Button } from "@/components/ui/button";
@@ -250,12 +250,12 @@ function PropertiesPage() {
       <PageHeader
         title={t("prop.title")}
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="hidden sm:flex items-center gap-1 text-muted-foreground">
               <Filter className="h-4 w-4" aria-hidden="true" />
             </div>
             <Select value={statusFilter || "__all"} onValueChange={(v) => setStatusFilter(v === "__all" ? "" : v)}>
-              <SelectTrigger className="h-8 w-[9rem]">
+              <SelectTrigger className="h-8 w-full sm:w-[9rem]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -305,19 +305,15 @@ function PropertiesPage() {
       />
 
       {isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-28 animate-pulse rounded-lg bg-muted" />
-          ))}
-        </div>
+        <CardGridSkeleton count={6} />
       ) : (properties ?? []).length === 0 ? (
         <EmptyState />
       ) : filtered.length === 0 ? (
         <EmptyState />
       ) : view === "list" ? (
         <ul className="surface divide-y divide-border">
-          {filtered.map((p) => (
-            <li key={p.id} className="flex items-center gap-1 pr-2 transition-colors hover:bg-accent">
+          {filtered.map((p, index) => (
+            <li key={p.id} className="flex items-center gap-1 pr-2 animate-card-enter transition-colors hover:bg-accent/40" style={{ animationDelay: `${index * 30}ms` }}>
               <Link
                 to="/properties/$propertyId"
                 params={{ propertyId: p.id }}
@@ -350,10 +346,11 @@ function PropertiesPage() {
         </ul>
       ) : (
         <div className={GRID_COLS[size]}>
-          {filtered.map((p) => (
+          {filtered.map((p, index) => (
             <div
               key={p.id}
-              className="surface overflow-hidden transition-shadow hover:shadow-[var(--shadow-lift)]"
+              className="surface overflow-hidden animate-card-enter transition-all hover:shadow-[var(--shadow-lift)] hover:-translate-y-0.5"
+              style={{ animationDelay: `${index * 40}ms` }}
             >
               <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="relative block">
                 <span

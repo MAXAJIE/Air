@@ -1110,6 +1110,38 @@ export type Database = {
           },
         ]
       }
+      task_completion_events: {
+        Row: {
+          id: string
+          task_id: string
+          user_id: string
+          owner_group_id: string | null
+          submitted_at: string
+        }
+        Insert: {
+          id?: string
+          task_id: string
+          user_id: string
+          owner_group_id?: string | null
+          submitted_at?: string
+        }
+        Update: {
+          id?: string
+          task_id?: string
+          user_id?: string
+          owner_group_id?: string | null
+          submitted_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_completion_events_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       special_requests: {
         Row: {
           assigned_to_user_id: string | null
@@ -1243,13 +1275,16 @@ export type Database = {
       }
       can_view_pii: { Args: { _user: string }; Returns: boolean }
       delete_payment_qr: { Args: { p_group: string }; Returns: undefined }
+      email_for_username: { Args: { p_username: string }; Returns: string }
       get_payment_qr: { Args: { p_group: string }; Returns: Json }
       get_pii: { Args: { _user: string }; Returns: Json }
+      guest_property_by_code: { Args: { _code: string }; Returns: Json }
       group_owner_id: { Args: { _group: string }; Returns: string }
       is_group_member: { Args: { _group: string }; Returns: boolean }
       is_group_owner: { Args: { _group: string }; Returns: boolean }
       is_hr_affiliated: { Args: { _group: string }; Returns: boolean }
       job_assignee: { Args: { _job: string }; Returns: string }
+      kick_hr_company: { Args: { p_group_id: string; p_hr_user_id: string }; Returns: undefined }
       job_group: { Args: { _job: string }; Returns: string }
       order_property: { Args: { _order: string }; Returns: string }
       order_worker: { Args: { _order: string }; Returns: string }

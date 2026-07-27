@@ -4,7 +4,7 @@ import { CheckCircle2, ListChecks, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/app-shell";
+import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { SignedPhoto } from "@/components/signed-photo";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -165,9 +165,12 @@ function TasksPage() {
         )}
       </div>
 
+      {tasksQ.isLoading ? (
+        <ListSkeleton rows={5} />
+      ) : (
       <section className="surface divide-y divide-border">
-        {tasks.map((task) => (
-          <article key={task.id} className="flex flex-wrap items-center gap-3 p-4">
+        {tasks.map((task, index) => (
+          <article key={task.id} className="flex flex-wrap items-center gap-2 p-3 sm:gap-3 sm:p-4 animate-card-enter transition-colors hover:bg-accent/40" style={{ animationDelay: `${index * 40}ms` }}>
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-2">
                 <button
@@ -208,7 +211,7 @@ function TasksPage() {
                 {t("task.approve")}
               </Button>
             )}
-            {isOwner && task.status === "done" && (
+            {isOwner && task.status === "done" && task.source !== "cleaning" && (
               <Button
                 size="sm"
                 variant="outline"
@@ -235,6 +238,7 @@ function TasksPage() {
           <p className="p-8 text-center text-sm text-muted-foreground">{t("common.none")}</p>
         )}
       </section>
+      )}
 
       {creating && groupId && profile && (
         <CreateTaskDialog
@@ -330,6 +334,7 @@ function CreateTaskDialog({
         // is created below so both surfaces show the same amount.
         if (!templateId) throw new Error("Pick a cleaning template");
         const propertyIdVal = propertyId === "none" ? null : propertyId;
+        if (!propertyIdVal) throw new Error("A property must be selected for cleaning jobs");
         const { data: template, error: tErr } = await supabase
           .from("cleaning_templates")
           .select("id, name, cleaning_template_items ( description, sort_order )")
@@ -341,7 +346,7 @@ function CreateTaskDialog({
           .from("cleaning_jobs")
           .insert({
             owner_group_id: groupId,
-            property_id: propertyIdVal,
+            property_id: propertyIdVal!, // cleaning_jobs requires a non-null property_id
             template_id: templateId,
             scheduled_at: scheduled,
             assigned_to_user_id: assignee || null,
@@ -564,6 +569,7 @@ function TaskDetailDialog({
     title: string;
     description: string | null;
     status: TaskStatus;
+    source: string | null;
     cleaning_job_id: string | null;
     proof_photo_path: string | null;
   };
@@ -656,7 +662,7 @@ function TaskDetailDialog({
                 {t("task.approve")}
               </Button>
             )}
-            {task.status === "done" && (
+            {task.status === "done" && task.source !== "cleaning" && (
               <Button variant="outline" onClick={onReopen}>
                 {t("task.reopen")}
               </Button>

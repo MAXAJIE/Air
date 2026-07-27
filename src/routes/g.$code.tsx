@@ -33,9 +33,13 @@ import {
   submitRoomCondition,
 } from "@/lib/guest.functions";
 import { cn } from "@/lib/utils";
+import { formatPrice } from "@/lib/format-price";
 
 export const Route = createFileRoute("/g/$code")({
   ssr: false,
+  validateSearch: (search: Record<string, unknown>): { session?: string } => ({
+    session: typeof search.session === "string" ? search.session : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Welcome — Keyward" },
@@ -197,6 +201,7 @@ function PhotoUpload({
 /* ------------------------------------------------------------------ */
 function GuestByCodePage() {
   const { code } = Route.useParams();
+  const { session: sessionFromUrl } = Route.useSearch();
   const navigate = useNavigate();
   const t = useT();
 
@@ -217,16 +222,19 @@ function GuestByCodePage() {
     retry: false,
   });
 
-  // ---- Step 2: Auto-start session when property is found ----
+  // ---- Step 2: Auto-start session when property is found (skip if we have one from URL) ----
   const sessionQ = useQuery({
     queryKey: ["guest-session", code, propertyQ.data?.id],
-    enabled: !!propertyQ.data?.id,
+    enabled: !!propertyQ.data?.id && !sessionFromUrl,
     queryFn: async (): Promise<SessionState> => {
       const result = await startGuestSession({ data: { propertyId: propertyQ.data!.id, code } });
       return { sessionId: result.sessionId, propertyName: result.propertyName };
     },
     retry: false,
   });
+
+  // ---- Effective session ID (from URL on refresh, or from startGuestSession) ----
+  const effectiveSessionId = sessionFromUrl || sessionQ.data?.sessionId || null;
 
   // Store sessionId in URL so refresh doesn't restart
   useEffect(() => {
@@ -237,51 +245,69 @@ function GuestByCodePage() {
 
   // ---- Step 3: Fetch context (amenities, catalog, QR, cleaner) ----
   const contextQ = useQuery({
-    queryKey: ["guest-context", session?.sessionId],
-    enabled: !!session?.sessionId,
+    queryKey: ["guest-context", effectiveSessionId, propertyQ.data?.id],
+    enabled: !!effectiveSessionId && !!propertyQ.data,
     queryFn: async (): Promise<GuestContext> => {
-      const result = await getGuestContext({ data: { propertyId: propertyQ.data!.id, sessionId: session!.sessionId } });
+      const result = await getGuestContext({ data: { propertyId: propertyQ.data!.id, sessionId: effectiveSessionId! } });
       return result as GuestContext;
     },
     retry: false,
   });
 
-  // ---- Drive the state machine ----
-  if (propertyQ.isError) {
-    // Couldn't look up property — bad code or server error
-    if (view !== "error") {
+  // ---- Drive the state machine in useEffect (not in render!) ----
+  useEffect(() => {
+    if (view !== "loading") return;
+
+    if (propertyQ.isError || (propertyQ.data === null && !propertyQ.isLoading)) {
       setView("error");
       setErrorMessage(t("guest.badCode"));
+      return;
     }
-  } else if (propertyQ.data === null && !propertyQ.isLoading) {
-    if (view !== "error") {
-      setView("error");
-      setErrorMessage(t("guest.badCode"));
+
+    if (sessionQ.isError && !sessionFromUrl) {
+      const msg = sessionQ.error instanceof Error ? sessionQ.error.message : "";
+      if (msg === "bad_code") {
+        setView("error");
+        setErrorMessage(t("guest.badCode"));
+      } else if (msg === "expired") {
+        setView("expired");
+      } else {
+        setView("error");
+        setErrorMessage(t("common.error"));
+      }
+      return;
     }
-  } else if (sessionQ.isError) {
-    const msg = sessionQ.error instanceof Error ? sessionQ.error.message : "";
-    if (msg === "bad_code" && view !== "error") {
-      setView("error");
-      setErrorMessage(t("guest.badCode"));
-    } else if (msg === "expired" && view !== "expired") {
-      setView("expired");
-    } else if (view !== "error") {
-      setView("error");
-      setErrorMessage(t("common.error"));
+
+    if (contextQ.isError) {
+      const msg = contextQ.error instanceof Error ? contextQ.error.message : "";
+      if (msg === "expired") {
+        setView("expired");
+      } else {
+        setView("error");
+        setErrorMessage(t("common.error"));
+      }
+      return;
     }
-  } else if (contextQ.isError) {
-    const msg = contextQ.error instanceof Error ? contextQ.error.message : "";
-    if (msg === "expired" && view !== "expired") {
-      setView("expired");
-    } else if (view !== "error") {
-      setView("error");
-      setErrorMessage(t("common.error"));
+
+    if (effectiveSessionId && contextQ.data) {
+      setSession({ sessionId: effectiveSessionId, propertyName: contextQ.data.propertyName });
+      setContext(contextQ.data);
+      setView("menu");
     }
-  } else if (sessionQ.data && contextQ.data && view === "loading") {
-    setSession(sessionQ.data);
-    setContext(contextQ.data);
-    setView("menu");
-  }
+  }, [
+    view,
+    sessionFromUrl,
+    effectiveSessionId,
+    propertyQ.data,
+    propertyQ.isLoading,
+    propertyQ.isError,
+    sessionQ.isError,
+    sessionQ.error,
+    contextQ.data,
+    contextQ.isError,
+    contextQ.error,
+    t,
+  ]);
 
   const property = propertyQ.data;
 
@@ -793,7 +819,7 @@ function ShopView({
               {item.description && (
                 <span className="block truncate text-xs text-muted-foreground">{item.description}</span>
               )}
-              <span className="block text-xs text-muted-foreground">{item.price}</span>
+              <span className="block text-xs font-medium text-emerald-600 dark:text-emerald-400">{formatPrice(item.price)}</span>
             </span>
             <div className="flex shrink-0 items-center gap-2 pl-3">
               <button
@@ -835,7 +861,7 @@ function ShopView({
       {lines.length > 0 && (
         <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3">
           <span className="text-sm font-medium">{t("guest.cart")}</span>
-          <span className="font-display text-lg font-semibold">{total.toFixed(2)}</span>
+          <span className="font-display text-lg font-semibold">{formatPrice(total)}</span>
         </div>
       )}
 

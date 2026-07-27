@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, CheckCircle2, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/app-shell";
+import { CardGridSkeleton, ListSkeleton, PageHeader } from "@/components/app-shell";
 import { RequestsPanel } from "@/components/requests-panel";
 import { PhotoPicker } from "@/components/photo-picker";
 import { SignedPhoto } from "@/components/signed-photo";
@@ -41,8 +41,12 @@ import { useActiveGroup } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { fileToBase64 } from "@/lib/files";
+import { formatPrice, formatPriceNullable } from "@/lib/format-price";
 
 export const Route = createFileRoute("/_authenticated/shop")({
+  validateSearch: (search: Record<string, unknown>): { section?: string } => ({
+    section: typeof search.section === "string" ? search.section : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Shopping — Keyward" },
@@ -61,8 +65,22 @@ export const Route = createFileRoute("/_authenticated/shop")({
 type Section = "shop" | "requests";
 
 function ShopPage() {
+  const { section: sectionFromUrl } = Route.useSearch();
   const t = useT();
-  const [section, setSection] = useState<Section>("shop");
+  const navigate = useNavigate();
+  const [section, setSection] = useState<Section>(
+    sectionFromUrl === "requests" ? "requests" : "shop",
+  );
+
+  const handleSectionChange = (v: string) => {
+    if (!v) return;
+    setSection(v as Section);
+    navigate({
+      to: ".",
+      search: v === "shop" ? {} : { section: v },
+      replace: true,
+    });
+  };
 
   return (
     <>
@@ -72,7 +90,7 @@ function ShopPage() {
           <ToggleGroup
             type="single"
             value={section}
-            onValueChange={(v) => v && setSection(v as Section)}
+            onValueChange={handleSectionChange}
             variant="outline"
             size="sm"
             aria-label={t("shop.sectionToggle")}
@@ -92,7 +110,7 @@ function ShopSections() {
   return (
     <>
       <Tabs defaultValue="orders">
-        <TabsList>
+        <TabsList className="overflow-x-auto">
           <TabsTrigger value="orders">{t("shop.orders")}</TabsTrigger>
           <TabsTrigger value="catalog">{t("shop.catalog")}</TabsTrigger>
           <TabsTrigger value="preview">{t("shop.previewList")}</TabsTrigger>
@@ -199,10 +217,12 @@ function OrdersPanel() {
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
   });
 
+  if (ordersQ.isLoading) return <CardGridSkeleton count={3} />;
+
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {(ordersQ.data ?? []).map((o) => (
-        <article key={o.id} className="surface space-y-3 p-5">
+      {(ordersQ.data ?? []).map((o, index) => (
+        <article key={o.id} className="surface space-y-3 p-5 animate-card-enter transition-all duration-200 hover:shadow-[var(--shadow-lift)]" style={{ animationDelay: `${index * 40}ms` }}>
           <div className="flex items-start justify-between gap-2">
             <p className="min-w-0 truncate font-medium">
               {propsQ.data?.find((p) => p.id === o.property_id)?.name ?? "—"}
@@ -212,10 +232,10 @@ function OrdersPanel() {
             </span>
           </div>
           <p className="text-sm">
-            {t("shop.orderTotal")}: {o.total_amount}
+            {t("shop.orderTotal")}: <span className="font-medium">{formatPrice(o.total_amount)}</span>
           </p>
           <p className="text-sm text-muted-foreground">
-            {t("shop.amountEntered")}: {o.payment_proof_amount_entered ?? "—"}
+            {t("shop.amountEntered")}: {formatPriceNullable(o.payment_proof_amount_entered)}
           </p>
           {o.payment_proof_photo_url && (
             <SignedPhoto
@@ -328,6 +348,21 @@ function CatalogPanel() {
 
   const items = itemsQ.data ?? [];
 
+  if (itemsQ.isLoading) {
+    return (
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="h-6 w-24 animate-pulse rounded bg-muted" />
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-20 animate-pulse rounded-md bg-muted" />
+            <div className="h-8 w-28 animate-pulse rounded-md bg-muted" />
+          </div>
+        </div>
+        <CardGridSkeleton count={6} />
+      </section>
+    );
+  }
+
   return (
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -354,8 +389,8 @@ function CatalogPanel() {
 
       {view === "grid" ? (
         <div className={GRID_COLS[size]}>
-          {items.map((item) => (
-            <article key={item.id} className="surface flex flex-col overflow-hidden">
+          {items.map((item, index) => (
+            <article key={item.id} className="surface flex flex-col overflow-hidden animate-card-enter transition-all duration-200 hover:shadow-[var(--shadow-lift)]" style={{ animationDelay: `${index * 40}ms` }}>
               {item.photo_path ? (
                 <SignedPhoto
                   path={item.photo_path}
@@ -371,7 +406,7 @@ function CatalogPanel() {
               )}
               <div className="flex flex-1 flex-col gap-2 p-4">
                 <p className="truncate font-medium">{item.name}</p>
-                <p className="text-sm text-muted-foreground">{item.price}</p>
+                <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">{formatPrice(item.price)}</p>
                 <div className="mt-auto flex gap-2 pt-2">
                   <Button size="sm" variant="outline" onClick={() => setEditing(item)}>
                     <Pencil className="h-4 w-4" aria-hidden="true" />
@@ -394,8 +429,8 @@ function CatalogPanel() {
         </div>
       ) : (
         <ul className="surface divide-y divide-border">
-          {items.map((item) => (
-            <li key={item.id} className="flex items-center gap-3 p-3">
+          {items.map((item, index) => (
+            <li key={item.id} className="flex items-center gap-3 p-3 animate-card-enter transition-colors hover:bg-accent/50" style={{ animationDelay: `${index * 30}ms` }}>
               {item.photo_path ? (
                 <SignedPhoto
                   path={item.photo_path}
@@ -411,7 +446,7 @@ function CatalogPanel() {
                   {item.description ?? ""}
                 </span>
               </span>
-              <span className="shrink-0 text-sm text-muted-foreground">{item.price}</span>
+              <span className="shrink-0 text-sm font-medium text-emerald-600 dark:text-emerald-400">{formatPrice(item.price)}</span>
               <Button size="sm" variant="outline" onClick={() => setEditing(item)}>
                 <Pencil className="h-4 w-4" aria-hidden="true" />
               </Button>
@@ -577,7 +612,7 @@ function PreviewPanel() {
                     {item.description ?? ""}
                   </span>
                 </span>
-                <span className="shrink-0 text-sm">{item.price}</span>
+                <span className="shrink-0 text-sm font-medium text-emerald-600 dark:text-emerald-400">{formatPrice(item.price)}</span>
               </li>
             ))}
           {items.filter((item) => item.active).length === 0 && (
@@ -677,8 +712,7 @@ function QrPanel() {
     ? `data:${qr.content_type};base64,${qr.data_base64}`
     : null;
 
-  return (
-    <section className="surface max-w-md space-y-3 p-5">
+  return (        <section className="surface max-w-md space-y-3 p-5 transition-all duration-200 hover:shadow-[var(--shadow-lift)]">
       <h2 className="text-lg">{t("shop.qr")}</h2>
       <p className="text-sm text-muted-foreground">{t("shop.qrHelp")}</p>
       <p className="text-xs text-muted-foreground">{t("shop.qrEncrypted")}</p>

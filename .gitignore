@@ -16,6 +16,11 @@ dist-ssr
 .nitro
 *.local
 
+# Windows reserved filenames
+nul
+NUL
+NUL.*
+
 # Environment files (contain secrets, never commit)
 .env
 .env.local

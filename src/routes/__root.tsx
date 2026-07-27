@@ -7,13 +7,14 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { I18nProvider } from "@/i18n";
+import { I18nProvider, useI18n } from "@/i18n";
 import { Toaster } from "@/components/ui/sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { initCurrencyFromI18n } from "@/lib/format-price";
 
 function NotFoundComponent() {
   return (
@@ -40,20 +41,59 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
+  const [showDetails, setShowDetails] = useState(false);
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
 
+  const errorMessage = error?.message || String(error);
+  const errorStack = error?.stack || "";
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <div className="max-w-md text-center">
+      <div className="max-w-lg w-full text-center">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">
           This page didn't load
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Something went wrong on our end. You can try refreshing or head back home.
         </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
+        <div className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-left">
+          <p className="text-xs font-medium text-destructive">Error details</p>
+          <p className="mt-1 text-xs text-foreground/80 font-mono break-words">{errorMessage}</p>
+          {errorStack && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowDetails(!showDetails)}
+                className="mt-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
+              >
+                {showDetails ? "Hide stack trace" : "Show stack trace"}
+              </button>
+              {showDetails && (
+                <pre className="mt-2 max-h-40 overflow-y-auto text-[10px] text-muted-foreground whitespace-pre-wrap break-all">
+                  {errorStack}
+                </pre>
+              )}
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              const btn = document.activeElement as HTMLElement;
+              navigator.clipboard.writeText(`Error: ${errorMessage}\n\nStack:\n${errorStack}`)
+                .then(() => {
+                  btn.textContent = "Copied! ✓";
+                  setTimeout(() => { btn.textContent = "Copy error details"; }, 2000);
+                })
+                .catch(() => {});
+            }}
+            className="mt-2 text-xs text-muted-foreground underline-offset-2 hover:underline"
+          >
+            Copy error details
+          </button>
+        </div>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
               router.invalidate();
@@ -121,6 +161,14 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function CurrencyInitializer() {
+  const { locale, t } = useI18n();
+  useEffect(() => {
+    initCurrencyFromI18n(t("shop.currencySymbol"));
+  }, [locale, t]);
+  return null;
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const router = useRouter();
@@ -137,6 +185,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
+        <CurrencyInitializer />
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
         <Toaster position="top-center" richColors />

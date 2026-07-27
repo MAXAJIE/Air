@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, CheckCircle2, ClipboardList } from "lucide-react";
 
-import { EmptyState, PageHeader } from "@/components/app-shell";
+import { EmptyState, ListSkeleton, PageHeader } from "@/components/app-shell";
 import { useProfile } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
@@ -29,7 +29,7 @@ function shortDate(value: string | null | undefined) {
 function HistoryPage() {
   const t = useT();
   const { data: profile } = useProfile();
-  const userId = profile?.id ?? null;
+  const userId = profile?.user_id ?? null;
 
   const eventsQ = useQuery({
     queryKey: ["history-completions", userId],
@@ -42,11 +42,11 @@ function HistoryPage() {
         .order("submitted_at", { ascending: false })
         .limit(500);
       if (error) throw error;
-      return data ?? [];
+      return (data ?? []) as Array<{ id: string; task_id: string; submitted_at: string }>;
     },
   });
 
-  const taskIds = (eventsQ.data ?? []).map((e) => e.task_id);
+  const taskIds = (eventsQ.data ?? []).map((e: { task_id: string }) => e.task_id);
   const tasksQ = useQuery({
     queryKey: ["history-tasks", taskIds.join(",")],
     enabled: taskIds.length > 0,
@@ -80,20 +80,16 @@ function HistoryPage() {
       />
 
       {eventsQ.isLoading ? (
-        <div className="space-y-2">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-14 animate-pulse rounded-md bg-muted" />
-          ))}
-        </div>
+        <ListSkeleton rows={5} />
       ) : events.length === 0 ? (
         <EmptyState />
       ) : (
         <ul className="surface divide-y divide-border">
-          {events.map((ev) => {
+          {events.map((ev, index) => {
             const task = taskById.get(ev.task_id);
             const isCleaning = task?.source === "cleaning";
             return (
-              <li key={ev.id} className="flex items-center gap-3 p-3">
+              <li key={ev.id} className="flex items-center gap-3 p-3 animate-card-enter" style={{ animationDelay: `${index * 30}ms` }}>
                 <span
                   className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
                     isCleaning ? "bg-blue-500/10 text-blue-600" : "bg-emerald-500/10 text-emerald-600"

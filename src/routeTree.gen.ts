@@ -15,6 +15,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AuthenticatedAgenciesRouteImport } from './routes/_authenticated/agencies'
 import { Route as AuthenticatedCleaningRouteImport } from './routes/_authenticated/cleaning'
+import { Route as AuthenticatedCleaningHistoryRouteImport } from './routes/_authenticated/cleaning-history'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
 import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
@@ -60,6 +61,12 @@ const AuthenticatedCleaningRoute = AuthenticatedCleaningRouteImport.update({
   path: '/cleaning',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedCleaningHistoryRoute =
+  AuthenticatedCleaningHistoryRouteImport.update({
+    id: '/cleaning-history',
+    path: '/cleaning-history',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -146,6 +153,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/agencies': typeof AuthenticatedAgenciesRoute
   '/cleaning': typeof AuthenticatedCleaningRoute
+  '/cleaning-history': typeof AuthenticatedCleaningHistoryRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/inbox': typeof AuthenticatedInboxRoute
@@ -168,6 +176,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/agencies': typeof AuthenticatedAgenciesRoute
   '/cleaning': typeof AuthenticatedCleaningRoute
+  '/cleaning-history': typeof AuthenticatedCleaningHistoryRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/history': typeof AuthenticatedHistoryRoute
   '/inbox': typeof AuthenticatedInboxRoute
@@ -192,6 +201,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/_authenticated/agencies': typeof AuthenticatedAgenciesRoute
   '/_authenticated/cleaning': typeof AuthenticatedCleaningRoute
+  '/_authenticated/cleaning-history': typeof AuthenticatedCleaningHistoryRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/history': typeof AuthenticatedHistoryRoute
   '/_authenticated/inbox': typeof AuthenticatedInboxRoute
@@ -216,6 +226,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/agencies'
     | '/cleaning'
+    | '/cleaning-history'
     | '/dashboard'
     | '/history'
     | '/inbox'
@@ -238,6 +249,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/agencies'
     | '/cleaning'
+    | '/cleaning-history'
     | '/dashboard'
     | '/history'
     | '/inbox'
@@ -261,6 +273,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/_authenticated/agencies'
     | '/_authenticated/cleaning'
+    | '/_authenticated/cleaning-history'
     | '/_authenticated/dashboard'
     | '/_authenticated/history'
     | '/_authenticated/inbox'
@@ -328,6 +341,13 @@ declare module '@tanstack/react-router' {
       path: '/cleaning'
       fullPath: '/cleaning'
       preLoaderRoute: typeof AuthenticatedCleaningRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/cleaning-history': {
+      id: '/_authenticated/cleaning-history'
+      path: '/cleaning-history'
+      fullPath: '/cleaning-history'
+      preLoaderRoute: typeof AuthenticatedCleaningHistoryRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/dashboard': {
@@ -441,6 +461,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAgenciesRoute: typeof AuthenticatedAgenciesRoute
   AuthenticatedCleaningRoute: typeof AuthenticatedCleaningRoute
+  AuthenticatedCleaningHistoryRoute: typeof AuthenticatedCleaningHistoryRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedHistoryRoute: typeof AuthenticatedHistoryRoute
   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
@@ -460,6 +481,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAgenciesRoute: AuthenticatedAgenciesRoute,
   AuthenticatedCleaningRoute: AuthenticatedCleaningRoute,
+  AuthenticatedCleaningHistoryRoute: AuthenticatedCleaningHistoryRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedHistoryRoute: AuthenticatedHistoryRoute,
   AuthenticatedInboxRoute: AuthenticatedInboxRoute,

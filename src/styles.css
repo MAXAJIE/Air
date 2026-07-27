@@ -265,3 +265,20 @@
 @utility status-dot-violet {
   background-color: var(--status-violet-fg);
 }
+
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@utility animate-card-enter {
+  animation: card-enter 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+

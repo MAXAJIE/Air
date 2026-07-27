@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { Building2, Eye, Pencil, Plus, Trash2, UserRound } from "lucide-react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { Building2, CheckCircle2, Eye, Pencil, Plus, Trash2, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/app-shell";
+import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { PhotoPicker } from "@/components/photo-picker";
 import { SignedPhoto } from "@/components/signed-photo";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,9 @@ import { jobStatusChipClass, statusChipClass } from "@/lib/status-colors";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/cleaning")({
+  validateSearch: (search: Record<string, unknown>): { tab?: string } => ({
+    tab: typeof search.tab === "string" ? search.tab : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Cleaning — Keyward" },
@@ -48,11 +51,25 @@ export const Route = createFileRoute("/_authenticated/cleaning")({
 });
 
 function CleaningPage() {
+  const { tab: tabFromUrl } = Route.useSearch();
   const t = useT();
+  const navigate = useNavigate();
+  const [tab, setTab] = useState(tabFromUrl === "templates" ? "templates" : "jobs");
+
+  // Sync tab changes back to the URL so external navigation lands on the right tab
+  const handleTabChange = (value: string) => {
+    setTab(value);
+    navigate({
+      to: ".",
+      search: value === "jobs" ? {} : { tab: value },
+      replace: true,
+    });
+  };
+
   return (
     <>
       <PageHeader title={t("clean.title")} />
-      <Tabs defaultValue="jobs">
+      <Tabs value={tab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="jobs">{t("clean.jobs")}</TabsTrigger>
           <TabsTrigger value="templates">{t("clean.templates")}</TabsTrigger>
@@ -176,6 +193,7 @@ function JobsPanel() {
     },
   });
 
+  const JOBS_LIMIT = 10;
   const jobsQ = useQuery({
     queryKey: ["jobs", groupId],
     enabled: !!groupId,
@@ -186,9 +204,24 @@ function JobsPanel() {
           "id, status, property_id, template_id, scheduled_at, assigned_to_user_id, started_at, completed_at",
         )
         .eq("owner_group_id", groupId!)
-        .order("scheduled_at", { ascending: false });
+        .order("scheduled_at", { ascending: false })
+        .limit(JOBS_LIMIT);
       if (error) throw error;
       return data as JobRow[];
+    },
+  });
+
+  // Check if there are more jobs beyond the limit
+  const hasMoreQ = useQuery({
+    queryKey: ["jobs-count", groupId],
+    enabled: !!groupId,
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("cleaning_jobs")
+        .select("*", { count: "exact", head: true })
+        .eq("owner_group_id", groupId!);
+      if (error) throw error;
+      return (count ?? 0) > JOBS_LIMIT;
     },
   });
 
@@ -225,6 +258,23 @@ function JobsPanel() {
         .single();
       if (error) throw error;
       await snapshotTemplate(job.id, templateId);
+
+      // Notify the assigned cleaner (direct) or HR company (hr_request)
+      if (assignType === "direct" && assignee) {
+        const { error: nErr } = await supabase.from("notifications").insert({
+          user_id: assignee,
+          type: "job_assigned",
+          payload: { jobId: job.id, propertyId },
+        });
+        if (nErr) throw nErr;
+      } else if (assignType === "hr_company" && hrCompanyId) {
+        const { error: nErr } = await supabase.from("notifications").insert({
+          user_id: hrCompanyId,
+          type: "hr_request",
+          payload: { jobId: job.id, propertyId },
+        });
+        if (nErr) throw nErr;
+      }
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["jobs", groupId] });
@@ -242,12 +292,48 @@ function JobsPanel() {
 
   const review = useMutation({
     mutationFn: async (id: string) => {
+      // Fetch the job to get the assigned cleaner and HR company before updating
+      const { data: job, error: fetchErr } = await supabase
+        .from("cleaning_jobs")
+        .select("id, assigned_to_user_id, assigned_hr_company_id, property_id")
+        .eq("id", id)
+        .single();
+      if (fetchErr) throw fetchErr;
+
+      // Mark the cleaning job as reviewed
       const { error } = await supabase.from("cleaning_jobs").update({ status: "reviewed" }).eq("id", id);
       if (error) throw error;
+
+      // Mark the associated task as done so it doesn't stay "submitted"
+      const { error: tErr } = await supabase
+        .from("tasks")
+        .update({ status: "done" })
+        .eq("cleaning_job_id", id);
+      if (tErr) throw tErr;
+
+      // Notify the cleaner that their job was reviewed
+      if (job.assigned_to_user_id) {
+        const { error: nErr } = await supabase.from("notifications").insert({
+          user_id: job.assigned_to_user_id,
+          type: "job_reviewed",
+          payload: { jobId: id, propertyId: job.property_id },
+        });
+        if (nErr) throw nErr;
+      }
+      // Notify the HR company that the job was reviewed
+      if (job.assigned_hr_company_id) {
+        const { error: nErr } = await supabase.from("notifications").insert({
+          user_id: job.assigned_hr_company_id,
+          type: "hr_job_reviewed",
+          payload: { jobId: id, propertyId: job.property_id },
+        });
+        if (nErr) throw nErr;
+      }
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["jobs", groupId] });
       await qc.invalidateQueries({ queryKey: ["tasks", groupId] });
+      toast.success(t("clean.review"));
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
   });
@@ -255,6 +341,13 @@ function JobsPanel() {
   const removeJob = useMutation({
     mutationFn: async (job: JobRow) => {
       if (job.status !== "pending") throw new Error(t("clean.jobLocked"));
+      // Clean up the associated task first
+      const { error: taskErr } = await supabase
+        .from("tasks")
+        .delete()
+        .eq("cleaning_job_id", job.id);
+      if (taskErr) throw taskErr;
+      // Then delete the job
       const { error } = await supabase.from("cleaning_jobs").delete().eq("id", job.id);
       if (error) throw error;
     },
@@ -406,9 +499,11 @@ function JobsPanel() {
       <section className="surface p-5">
         <h2 className="mb-1 text-lg">{t("clean.jobs")}</h2>
         <p className="mb-3 text-xs text-muted-foreground">{t("clean.jobsMirrored")}</p>
-        <ul className="divide-y divide-border text-sm">
-          {(jobsQ.data ?? []).map((j) => (
-            <li key={j.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+        {jobsQ.isLoading ? (
+          <ListSkeleton rows={5} />
+        ) : (
+        <ul className="divide-y divide-border text-sm">            {(jobsQ.data ?? []).map((j, index) => (
+            <li key={j.id} className="flex flex-wrap items-center justify-between gap-2 py-2 sm:gap-3 sm:py-2.5 animate-card-enter transition-colors hover:bg-accent/40" style={{ animationDelay: `${index * 40}ms` }}>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
                   <span className="truncate font-medium">{propertyName(j.property_id)}</span>
@@ -419,15 +514,10 @@ function JobsPanel() {
                   {cleanerName(j.assigned_to_user_id)}
                 </span>
               </span>
-              <span className="flex shrink-0 items-center gap-2">
+              <span className="flex shrink-0 items-center gap-1 sm:gap-2">
                 <span className={jobStatusChipClass(j.status)}>
                   {t(`clean.status.${j.status}`)}
                 </span>
-                {j.status === "submitted" && (
-                  <Button size="sm" variant="outline" onClick={() => review.mutate(j.id)}>
-                    {t("clean.review")}
-                  </Button>
-                )}
                 <Button
                   size="icon"
                   variant="ghost"
@@ -468,8 +558,28 @@ function JobsPanel() {
             <li className="py-6 text-center text-muted-foreground">{t("common.none")}</li>
           )}
         </ul>
+        )}
+        {hasMoreQ.data && (
+          <div className="mt-4 flex justify-center">
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/cleaning-history">{t("clean.viewAll")}</Link>
+            </Button>
+          </div>
+        )}
       </section>
 
+      {previewJob && (
+        <JobPreviewDialog
+          job={previewJob}
+          propertyName={propertyName(previewJob.property_id)}
+          cleanerName={cleanerName(previewJob.assigned_to_user_id)}
+          onClose={() => setPreviewJob(null)}
+          onReview={() => {
+            review.mutate(previewJob.id);
+            setPreviewJob(null);
+          }}
+        />
+      )}
       {editingJob && (
         <JobEditDialog
           job={editingJob}
@@ -478,14 +588,6 @@ function JobsPanel() {
           templates={templatesQ.data ?? []}
           cleaners={cleanersQ.data ?? []}
           onClose={() => setEditingJob(null)}
-        />
-      )}
-      {previewJob && (
-        <JobPreviewDialog
-          job={previewJob}
-          propertyName={propertyName(previewJob.property_id)}
-          cleanerName={cleanerName(previewJob.assigned_to_user_id)}
-          onClose={() => setPreviewJob(null)}
         />
       )}
     </div>
@@ -631,11 +733,13 @@ function JobPreviewDialog({
   propertyName,
   cleanerName,
   onClose,
+  onReview,
 }: {
   job: JobRow;
   propertyName: string;
   cleanerName: string;
   onClose: () => void;
+  onReview?: () => void;
 }) {
   const t = useT();
   const itemsQ = useQuery({
@@ -643,7 +747,7 @@ function JobPreviewDialog({
     queryFn: async () => {
       const { data, error } = await supabase
         .from("cleaning_job_items")
-        .select("id, description, is_checked, sort_order")
+        .select("id, description, is_checked, photo_url, sort_order")
         .eq("cleaning_job_id", job.id)
         .order("sort_order");
       if (error) throw error;
@@ -687,8 +791,18 @@ function JobPreviewDialog({
                 <span className="font-medium">
                   {index + 1}. {item.description}
                 </span>
-                {item.is_checked && (
-                  <span className={`ml-2 ${statusChipClass("green")}`}>{t("clean.itemDone")}</span>
+                <div className="mt-1 flex items-center gap-2">
+                  <Checkbox checked={item.is_checked} disabled />
+                  {item.is_checked && (
+                    <span className={statusChipClass("green")}>{t("clean.itemDone")}</span>
+                  )}
+                </div>
+                {item.photo_url && (
+                  <SignedPhoto
+                    path={item.photo_url}
+                    alt={item.description}
+                    className="mt-2 h-32 w-full rounded-md object-cover"
+                  />
                 )}
               </li>
             ))}
@@ -697,6 +811,17 @@ function JobPreviewDialog({
             )}
           </ol>
         </div>
+        {job.status === "submitted" && onReview && (
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>
+              {t("common.close")}
+            </Button>
+            <Button onClick={onReview}>
+              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+              {t("clean.review")}
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -833,7 +958,7 @@ function AmenityTemplatesPanel() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(templatesQ.data ?? []).map((tpl) => (
-          <article key={tpl.id} className="surface flex flex-col gap-3 p-5">
+          <article key={tpl.id} className="surface flex flex-col gap-3 p-5 transition-shadow hover:shadow-[var(--shadow-lift)]">
             <div>
               <h3 className="truncate font-medium">{tpl.name}</h3>
               <p className="text-xs text-muted-foreground">
@@ -1236,7 +1361,7 @@ function CleaningTemplatesPanel() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(templatesQ.data ?? []).map((tpl) => (
-          <article key={tpl.id} className="surface flex flex-col gap-3 p-5">
+          <article key={tpl.id} className="surface flex flex-col gap-3 p-5 transition-shadow hover:shadow-[var(--shadow-lift)]">
             <div>
               <h3 className="truncate font-medium">{tpl.name}</h3>
               <p className="text-xs text-muted-foreground">

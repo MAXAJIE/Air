@@ -4,7 +4,7 @@ import { Building2, Handshake } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/app-shell";
+import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -83,6 +83,18 @@ function Page() {
 
   const affiliations = affilQ.data ?? [];
 
+  if (affilQ.isLoading) {
+    return (
+      <>
+        <PageHeader title={t("agencies.title")} />
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+          <ListSkeleton rows={3} />
+          <div />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader title={t("agencies.title")} />
@@ -93,10 +105,11 @@ function Page() {
             <h2 className="text-lg">{t("agencies.owners")}</h2>
           </div>
           <ul className="space-y-2">
-            {affiliations.map((a) => (
+            {affiliations.map((a, index) => (
               <li
                 key={a.id}
-                className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
+                className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5 animate-card-enter"
+                style={{ animationDelay: `${index * 40}ms` }}
               >
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground">
                   <Building2 className="h-4 w-4" aria-hidden="true" />

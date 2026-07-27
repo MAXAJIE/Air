@@ -4,7 +4,7 @@ import { Lock, Mail, Settings, ShieldCheck, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/app-shell";
+import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { AvatarCropPicker } from "@/components/avatar-crop-picker";
 import { PasswordMeter } from "@/components/password-meter";
 import { PhotoPicker } from "@/components/photo-picker";
@@ -89,6 +89,22 @@ function ProfilePreview() {
   const { data: profile } = useProfile();
   const piiQ = usePii();
   const pii = piiQ.data;
+
+  if (piiQ.isLoading) {
+    return (
+      <div className="space-y-4">
+        <section className="surface flex flex-col items-center gap-4 p-6 text-center sm:flex-row sm:text-left">
+          <span className="h-24 w-24 animate-pulse rounded-full bg-muted" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="h-6 w-40 animate-pulse rounded bg-muted" />
+            <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+          </div>
+        </section>
+        <ListSkeleton rows={4} />
+        <ListSkeleton rows={3} />
+      </div>
+    );
+  }
 
   const rows: Array<[string, string]> = [
     [t("profile.fullName"), pii?.full_name || "—"],

@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Building2, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/app-shell";
+import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -94,11 +94,26 @@ function Page() {
 
   const assign = useMutation({
     mutationFn: async ({ jobId, cleanerUserId }: { jobId: string; cleanerUserId: string }) => {
+      // Fetch the job for its property_id
+      const { data: job } = await supabase
+        .from("cleaning_jobs")
+        .select("property_id")
+        .eq("id", jobId)
+        .single();
+
       const { error } = await supabase
         .from("cleaning_jobs")
         .update({ assigned_to_user_id: cleanerUserId })
         .eq("id", jobId);
       if (error) throw error;
+
+      // Notify the cleaner that a job was assigned to them
+      const { error: nErr } = await supabase.from("notifications").insert({
+        user_id: cleanerUserId,
+        type: "job_assigned",
+        payload: { jobId, propertyId: job?.property_id ?? null },
+      });
+      if (nErr) throw nErr;
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["hr-inbox", user?.id] });
@@ -119,10 +134,13 @@ function Page() {
     <>
       <PageHeader title={t("hr.inbox")} />
 
+      {jobsQ.isLoading ? (
+        <ListSkeleton rows={4} />
+      ) : (
       <section className="surface p-5">
         <ul className="divide-y divide-border text-sm">
-          {jobs.map((j) => (
-            <li key={j.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+          {jobs.map((j, index) => (
+            <li key={j.id} className="flex flex-wrap items-center justify-between gap-2 animate-card-enter py-2 transition-colors hover:bg-accent/40 sm:gap-3 sm:py-2.5" style={{ animationDelay: `${index * 40}ms` }}>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
                   <Building2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
@@ -145,7 +163,7 @@ function Page() {
                   <Select
                     onValueChange={(v) => assign.mutate({ jobId: j.id, cleanerUserId: v })}
                   >
-                    <SelectTrigger className="h-8 w-36">
+                    <SelectTrigger className="h-8 w-full sm:w-36">
                       <SelectValue placeholder={t("hr.assignCleaner")} />
                     </SelectTrigger>
                     <SelectContent>
@@ -167,6 +185,7 @@ function Page() {
           )}
         </ul>
       </section>
+      )}
     </>
   );
 }

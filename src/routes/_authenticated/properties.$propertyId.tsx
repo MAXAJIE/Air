@@ -4,7 +4,7 @@ import { ArrowLeft, Trash2, Copy, ExternalLink, Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/app-shell";
+import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -218,6 +218,25 @@ function PropertyDetailView() {
       ? `${window.location.origin}/g/${property.access_code ?? ""}`
       : "";
 
+  if (propertyQ.isLoading) {
+    return (
+      <>
+        <Link
+          to="/properties"
+          className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+          {t("common.back")}
+        </Link>
+        <PageHeader title={t("prop.title")} />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ListSkeleton rows={3} />
+          <ListSkeleton rows={2} />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <Link
@@ -340,7 +359,7 @@ function PropertyDetailView() {
               <li key={s.id} className="flex flex-wrap items-center justify-between gap-2">
                 <Input
                   defaultValue={s.label}
-                  className="h-8 max-w-[10rem]"
+                  className="h-8 max-w-full sm:max-w-[10rem]"
                   onBlur={(e) => {
                     const v = e.currentTarget.value.trim();
                     if (v && v !== s.label) renameStatus.mutate({ id: s.id, label: v });

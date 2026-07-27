@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { PageHeader } from "@/components/app-shell";
+import { ListSkeleton, PageHeader, StatsSkeleton } from "@/components/app-shell";
 import {
   Select,
   SelectContent,
@@ -166,6 +166,17 @@ function CleanerPerformance({ cleanerUserId }: { cleanerUserId: string | null })
   const jobs = data?.jobs ?? [];
   const checks = data?.checks ?? [];
 
+  if (dataQ.isLoading) {
+    return (
+      <div className="space-y-6">
+        <StatsSkeleton count={3} />
+        <ListSkeleton rows={4} />
+        <ListSkeleton rows={3} />
+        <ListSkeleton rows={3} />
+      </div>
+    );
+  }
+
   const avgRating =
     ratings.length > 0
       ? (ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length).toFixed(1)
@@ -234,8 +245,8 @@ function CleanerPerformance({ cleanerUserId }: { cleanerUserId: string | null })
       <section className="surface space-y-3 p-5">
         <h2 className="text-lg">{t("perf.ratings")}</h2>
         <ul className="divide-y divide-border text-sm">
-          {ratings.map((r) => (
-            <li key={r.id} className="flex items-center justify-between gap-3 py-2.5">
+          {ratings.map((r, index) => (
+            <li key={r.id} className="flex items-center justify-between gap-3 py-2.5 animate-card-enter" style={{ animationDelay: `${index * 30}ms` }}>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1">
                   {Array.from({ length: 5 }, (_, i) => (
@@ -268,12 +279,12 @@ function CleanerPerformance({ cleanerUserId }: { cleanerUserId: string | null })
       <section className="surface space-y-3 p-5">
         <h2 className="text-lg">{t("perf.times")}</h2>
         <ul className="divide-y divide-border text-sm">
-          {jobs.map((j) => {
+          {jobs.map((j, index) => {
             const d = new Date(j.completed_at!).getTime() - new Date(j.started_at!).getTime();
             const mins = Math.round(d / 60000);
             const label = mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
             return (
-              <li key={j.id} className="flex items-center justify-between gap-3 py-2.5">
+              <li key={j.id} className="flex items-center justify-between gap-3 py-2.5 animate-card-enter" style={{ animationDelay: `${index * 30}ms` }}>
                 <span className="text-xs text-muted-foreground">
                   {new Date(j.completed_at!).toLocaleDateString()}
                 </span>
@@ -291,8 +302,8 @@ function CleanerPerformance({ cleanerUserId }: { cleanerUserId: string | null })
       <section className="surface space-y-3 p-5">
         <h2 className="text-lg">{t("perf.discrepancies")}</h2>
         <ul className="divide-y divide-border text-sm">
-          {checks.map((c) => (
-            <li key={c.id} className="flex items-center justify-between gap-3 py-2.5">
+          {checks.map((c, index) => (
+            <li key={c.id} className="flex items-center justify-between gap-3 py-2.5 animate-card-enter" style={{ animationDelay: `${index * 30}ms` }}>
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">
                   {c.definition?.name ?? c.amenity_definition_id.slice(0, 8)}

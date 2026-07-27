@@ -1,6 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquare } from "lucide-react";
+import { useState } from "react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -9,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useActiveGroup } from "@/hooks/use-app";
+import { useActiveGroup, useAuthUser } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -78,6 +89,8 @@ export function RequestsPanel() {
     },
   });
 
+  const { data: user } = useAuthUser();
+
   const patch = useMutation({
     mutationFn: async ({
       id,
@@ -95,6 +108,75 @@ export function RequestsPanel() {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["requests"] }),
   });
+
+  // When assigning a special request to a worker, also create a task so it
+  // appears in the worker's job list and triggers a task_assigned notification.
+  const assignWithTask = useMutation({
+    mutationFn: async ({
+      requestId,
+      workerId,
+    }: {
+      requestId: string;
+      workerId: string;
+    }) => {
+      // Look up the request details from our cached data
+      const request = (reqQ.data ?? []).find((r) => r.id === requestId);
+      if (!request) throw new Error("Request not found");
+
+      // Update the special request status
+      const { error: reqErr } = await supabase
+        .from("special_requests")
+        .update({ assigned_to_user_id: workerId, status: "assigned" })
+        .eq("id", requestId);
+      if (reqErr) throw reqErr;
+
+      // Truncate the description for the task title
+      const title =
+        request.description.length > 60
+          ? request.description.slice(0, 57) + "..."
+          : request.description;
+
+      // Create a task for the worker, returning its id so we can reference it
+      const { data: newTask, error: taskErr } = await supabase
+        .from("tasks")
+        .insert({
+          owner_group_id: groupId,
+          assigned_to_user_id: workerId,
+          property_id: request.property_id,
+          title,
+          description: request.description,
+          created_by_user_id: user!.id,
+          source: "manual",
+          is_private: false,
+        })
+        .select("id")
+        .single();
+      if (taskErr) throw taskErr;
+
+      // Also create a notification directly so the worker is alerted
+      // even if the DB trigger migration hasn't been applied yet.
+      const { error: notifErr } = await supabase.from("notifications").insert({
+        user_id: workerId,
+        type: "task_assigned",
+        payload: { taskId: newTask.id, propertyId: request.property_id },
+      });
+      if (notifErr) throw notifErr;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["requests"] });
+      qc.invalidateQueries({ queryKey: ["tasks", groupId] });
+    },
+    onError: (e) => {
+      window.alert(e instanceof Error ? e.message : t("common.error"));
+    },
+  });
+
+  // Pending assignment confirmation: { requestId, workerId, workerName }
+  const [pendingAssign, setPendingAssign] = useState<{
+    requestId: string;
+    workerId: string;
+    workerName: string;
+  } | null>(null);
 
   return (
     <div className="space-y-4">
@@ -126,12 +208,16 @@ export function RequestsPanel() {
             {r.status !== "resolved" && (
               <div className="space-y-2">
                 <Select
-                  onValueChange={(v) =>
-                    patch.mutate({
-                      id: r.id,
-                      values: { assigned_to_user_id: v, status: "assigned" },
-                    })
-                  }
+                  onValueChange={(v) => {
+                    const worker = (workersQ.data ?? []).find((w) => w.user_id === v);
+                    if (worker) {
+                      setPendingAssign({
+                        requestId: r.id,
+                        workerId: v,
+                        workerName: worker.name,
+                      });
+                    }
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder={t("req.assign")} />
@@ -164,6 +250,41 @@ export function RequestsPanel() {
           <p className="text-sm text-muted-foreground">{t("req.empty")}</p>
         )}
       </div>
+
+      {/* Confirmation dialog for assigning a worker */}
+      <AlertDialog
+        open={pendingAssign !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingAssign(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("common.confirm")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingAssign
+                ? t("req.assignConfirm").replace("{name}", pendingAssign.workerName)
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={assignWithTask.isPending}
+              onClick={() => {
+                if (!pendingAssign) return;
+                assignWithTask.mutate({
+                  requestId: pendingAssign.requestId,
+                  workerId: pendingAssign.workerId,
+                });
+                setPendingAssign(null);
+              }}
+            >
+              {t("req.confirmAssign")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

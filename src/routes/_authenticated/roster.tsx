@@ -4,7 +4,7 @@ import { Copy, Plus, Sparkle, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { PageHeader } from "@/components/app-shell";
+import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { useAuthUser } from "@/hooks/use-app";
 import { useT } from "@/i18n";
@@ -116,6 +116,18 @@ function Page() {
   const roster = rosterQ.data ?? [];
   const codes = codesQ.data ?? [];
 
+  if (rosterQ.isLoading || codesQ.isLoading) {
+    return (
+      <>
+        <PageHeader title={t("hr.roster")} />
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+          <ListSkeleton rows={3} />
+          <ListSkeleton rows={3} />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader title={t("hr.roster")} />
@@ -125,10 +137,11 @@ function Page() {
         <section className="surface space-y-3 p-5">
           <h2 className="text-lg">{t("hr.roster")}</h2>
           <ul className="space-y-2">
-            {roster.map((r) => (
+            {roster.map((r, index) => (
               <li
                 key={r.id}
-                className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
+                className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5 animate-card-enter"
+                style={{ animationDelay: `${index * 40}ms` }}
               >
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground">
                   <Sparkle className="h-4 w-4" aria-hidden="true" />
@@ -172,8 +185,8 @@ function Page() {
             {t("people.generate")}
           </Button>
           <ul className="divide-y divide-border text-sm">
-            {codes.map((c) => (
-              <li key={c.id} className="flex items-center justify-between gap-3 py-2.5">
+            {codes.map((c, index) => (
+              <li key={c.id} className="flex items-center justify-between gap-3 py-2.5 animate-card-enter" style={{ animationDelay: `${index * 30}ms` }}>
                 <span className="font-mono">{c.code}</span>
                 <span className="flex shrink-0 gap-1">
                   <Button

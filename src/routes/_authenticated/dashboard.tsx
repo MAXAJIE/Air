@@ -15,7 +15,7 @@ import {
 import { useEffect, useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { PageHeader, StatCard } from "@/components/app-shell";
+import { PageHeader, StatCard, StatsSkeleton, ListSkeleton } from "@/components/app-shell";
 import { useActiveGroup, useAuthUser, useProfile } from "@/hooks/use-app";
 import { useT, type TranslationKey } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
@@ -120,7 +120,7 @@ function ActivityList({ rows }: { rows: ActivityRow[] }) {
       <h2 className="mb-3 text-lg">{t("dash.recent")}</h2>
       <ul className="divide-y divide-border text-sm">
         {rows.slice(0, 8).map((row) => (
-          <li key={row.id} className="flex items-center justify-between gap-3 py-2.5">
+          <li key={row.id} className="flex items-center justify-between gap-3 py-2.5 transition-colors hover:bg-accent/40">
             {row.to ? (
               <Link
                 to="/properties/$propertyId"
@@ -184,7 +184,7 @@ function OwnerDashboard() {
   const t = useT();
   const { groupId } = useActiveGroup();
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["dash-owner", groupId],
     enabled: !!groupId,
     queryFn: async () => {
@@ -209,6 +209,18 @@ function OwnerDashboard() {
       };
     },
   });
+
+  if (isLoading) {
+    return (
+      <>
+        <StatsSkeleton count={4} />
+        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+          <ListSkeleton rows={4} />
+          <ListSkeleton rows={5} />
+        </div>
+      </>
+    );
+  }
 
   const stats = useMemo(() => {
     const properties = data?.properties ?? [];
@@ -251,15 +263,10 @@ function OwnerDashboard() {
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label={t("dash.properties")}
-          value={stats.total}
-          icon={Building2}
-          hint={`${stats.ready} ${t("prop.statusList")}`}
-        />
-        <StatCard label={t("dash.openJobs")} value={stats.openJobs} icon={Sparkle} />
-        <StatCard label={t("dash.discrepancies")} value={stats.discrepancies} icon={AlertTriangle} />
-        <StatCard label={t("dash.requests")} value={stats.requests} icon={MessageSquare} />
+        <StatCard label={t("dash.properties")} value={stats.total} icon={Building2} hint={`${stats.ready} ${t("prop.statusList")}`} delay={0} />
+        <StatCard label={t("dash.openJobs")} value={stats.openJobs} icon={Sparkle} delay={80} />
+        <StatCard label={t("dash.discrepancies")} value={stats.discrepancies} icon={AlertTriangle} delay={160} />
+        <StatCard label={t("dash.requests")} value={stats.requests} icon={MessageSquare} delay={240} />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
@@ -274,7 +281,7 @@ function CleanerDashboard() {
   const t = useT();
   const { data: user } = useAuthUser();
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["dash-cleaner", user?.id],
     enabled: !!user?.id,
     queryFn: async () => {
@@ -303,7 +310,7 @@ function CleanerDashboard() {
   const todo = tasks.filter((t) => t.status === "pending").length;
   const running = tasks.filter((t) => t.status === "in_progress").length;
   const finished = tasks.filter(
-    (t) => t.status === "submitted" || t.status === "done" || t.status === "reviewed",
+    (t) => t.status === "submitted" || t.status === "done",
   ).length;
 
   const buckets: Bucket[] = (["pending", "in_progress", "submitted", "reviewed"] as const)
@@ -325,14 +332,24 @@ function CleanerDashboard() {
       title: task.title,
       meta: `${t(TASK_STATUS_KEY[task.status] ?? "task.pending")} · ${shortDate(task.due_at ?? task.created_at)}`,
     })),
-  ].slice(0, 8);
+  ].slice(0, 8);  if (isLoading) {
+    return (
+      <>
+        <StatsSkeleton count={3} />
+        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+          <ListSkeleton rows={3} />
+          <ListSkeleton rows={5} />
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <StatCard label={t("dash.jobsToDo")} value={todo} icon={ClipboardList} />
-        <StatCard label={t("dash.jobsRunning")} value={running} icon={Sparkle} />
-        <StatCard label={t("dash.jobsDone")} value={finished} icon={CheckCircle2} />
+        <StatCard label={t("dash.jobsToDo")} value={todo} icon={ClipboardList} delay={0} />
+        <StatCard label={t("dash.jobsRunning")} value={running} icon={Sparkle} delay={80} />
+        <StatCard label={t("dash.jobsDone")} value={finished} icon={CheckCircle2} delay={160} />
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
         <CountBars title={t("dash.myJobLoad")} data={buckets} />
@@ -346,7 +363,7 @@ function WorkerDashboard() {
   const t = useT();
   const { data: user } = useAuthUser();
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["dash-worker", user?.id],
     enabled: !!user?.id,
     queryFn: async () => {
@@ -398,13 +415,25 @@ function WorkerDashboard() {
     })),
   ].slice(0, 8);
 
+  if (isLoading) {
+    return (
+      <>
+        <StatsSkeleton count={4} />
+        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+          <ListSkeleton rows={4} />
+          <ListSkeleton rows={5} />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label={t("dash.myOrders")} value={openOrders} icon={ShoppingCart} />
-        <StatCard label={t("dash.myRequests")} value={openRequests} icon={MessageSquare} />
-        <StatCard label={t("dash.myTasks")} value={openTasks} icon={ListChecks} />
-        <StatCard label={t("dash.ordersHandled")} value={orders.length} icon={CheckCircle2} />
+        <StatCard label={t("dash.myOrders")} value={openOrders} icon={ShoppingCart} delay={0} />
+        <StatCard label={t("dash.myRequests")} value={openRequests} icon={MessageSquare} delay={80} />
+        <StatCard label={t("dash.myTasks")} value={openTasks} icon={ListChecks} delay={160} />
+        <StatCard label={t("dash.ordersHandled")} value={orders.length} icon={CheckCircle2} delay={240} />
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
         <CountBars title={t("dash.myOrderLoad")} data={buckets} />
@@ -418,7 +447,7 @@ function HrDashboard() {
   const t = useT();
   const { data: user } = useAuthUser();
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["dash-hr", user?.id],
     enabled: !!user?.id,
     queryFn: async () => {
@@ -462,13 +491,25 @@ function HrDashboard() {
     meta: `${t(`clean.status.${job.status}` as TranslationKey)} · ${shortDate(job.scheduled_at ?? job.created_at)}`,
   }));
 
+  if (isLoading) {
+    return (
+      <>
+        <StatsSkeleton count={4} />
+        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
+          <ListSkeleton rows={4} />
+          <ListSkeleton rows={5} />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label={t("dash.owners")} value={owners} icon={Handshake} />
-        <StatCard label={t("dash.rosterSize")} value={roster} icon={Users} />
-        <StatCard label={t("dash.pendingRequests")} value={openJobs} icon={ClipboardList} />
-        <StatCard label={t("dash.needsCleaner")} value={unassigned} icon={AlertTriangle} />
+        <StatCard label={t("dash.owners")} value={owners} icon={Handshake} delay={0} />
+        <StatCard label={t("dash.rosterSize")} value={roster} icon={Users} delay={80} />
+        <StatCard label={t("dash.pendingRequests")} value={openJobs} icon={ClipboardList} delay={160} />
+        <StatCard label={t("dash.needsCleaner")} value={unassigned} icon={AlertTriangle} delay={240} />
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
         <CountBars title={t("dash.companyJobLoad")} data={buckets} />

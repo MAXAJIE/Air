@@ -299,7 +299,7 @@ function OwnerPeople() {
 
           <ul className="divide-y divide-border text-sm">
             {(codesQ.data ?? []).map((c) => (
-              <li key={c.id} className="flex items-center justify-between gap-3 py-2.5">
+              <li key={c.id} className="flex items-center justify-between gap-3 py-2.5 transition-colors hover:bg-accent/40">
                 <span className="min-w-0">
                   <span className="block font-mono">{c.code}</span>
                   <span className="block text-xs text-muted-foreground">
@@ -467,10 +467,11 @@ function MemberPeople() {
             <p className="text-sm text-muted-foreground">{t("people.myHiresHelp")}</p>
           </div>
           <ul className="space-y-2">
-            {(hiresQ.data ?? []).map((h) => (
+            {(hiresQ.data ?? []).map((h, index) => (
               <li
                 key={h.id}
-                className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
+                className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5 animate-card-enter transition-colors hover:bg-accent/40"
+                style={{ animationDelay: `${index * 40}ms` }}
               >
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground">
                   <Building2 className="h-4 w-4" aria-hidden="true" />
@@ -542,6 +543,7 @@ function RoleColumn({
   cap,
   people,
   onRemove,
+  removeMode,
   icon = "user",
 }: {
   title: string;
@@ -564,11 +566,11 @@ function RoleColumn({
         </span>
       </header>
       <ul className="space-y-2">
-        {people.map((p) => (
-          <li
-            key={p.key}
-            className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5"
-          >
+        {people.map((p, index) => (            <li
+                key={p.key}
+                className="flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5 animate-card-enter transition-colors hover:bg-accent/40"
+                style={{ animationDelay: `${index * 40}ms` }}
+              >
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-secondary text-secondary-foreground">
               <Icon className="h-4 w-4" aria-hidden="true" />
             </span>

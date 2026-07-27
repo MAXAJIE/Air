@@ -4,7 +4,7 @@ import { CheckCircle2, ListChecks, Play, Send, Timer } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
-import { EmptyState, PageHeader } from "@/components/app-shell";
+import { EmptyState, ListSkeleton, PageHeader } from "@/components/app-shell";
 import { PhotoPicker } from "@/components/photo-picker";
 import { SignedPhoto } from "@/components/signed-photo";
 import { Button } from "@/components/ui/button";
@@ -126,13 +126,16 @@ function JobsPage() {
   return (
     <>
       <PageHeader title={t("nav.jobs")} />
-      {rows.length === 0 ? (
+      {tasksQ.isLoading ? (
+        <ListSkeleton rows={4} />
+      ) : rows.length === 0 ? (
         <EmptyState />
       ) : (
         <section className="grid gap-3">
-          {rows.map((task) => (
+          {rows.map((task, index) => (
             <TaskCard
               key={task.id}
+              index={index}
               task={task}
               onAccept={() => accept.mutate(task.id)}
               onSubmit={() => submit.mutate(task.id)}
@@ -146,10 +149,12 @@ function JobsPage() {
 
 function TaskCard({
   task,
+  index,
   onAccept,
   onSubmit,
 }: {
   task: Task;
+  index: number;
   onAccept: () => void;
   onSubmit: () => void;
 }) {
@@ -170,7 +175,7 @@ function TaskCard({
   };
 
   return (
-    <article className="surface space-y-3 p-4">
+    <article className="surface space-y-2 animate-card-enter p-3 transition-shadow hover:shadow-[var(--shadow-lift)] sm:space-y-3 sm:p-4" style={{ animationDelay: `${index * 40}ms` }}>
       <header className="flex flex-wrap items-center gap-2">
         <h3 className="min-w-0 flex-1 truncate text-base font-medium">{task.title}</h3>
         <span className={jobStatusChipClass(task.status)}>
@@ -224,13 +229,13 @@ function TaskCard({
         {task.status === "pending" && (
           <Button size="sm" onClick={onAccept}>
             <Play className="h-4 w-4" aria-hidden="true" />
-            {t("task.accept") || "Accept"}
+            {t("task.accept")}
           </Button>
         )}
         {task.status === "in_progress" && (
           <Button size="sm" disabled={saveProof} onClick={onSubmit}>
             <Send className="h-4 w-4" aria-hidden="true" />
-            {t("task.submit") || "Submit"}
+            {t("task.submit")}
           </Button>
         )}
         {task.status === "submitted" && (
