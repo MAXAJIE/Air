@@ -44,6 +44,15 @@ const en = {
   "reviews.stays": "Stay reviews",
   "reviews.staysSubtitle": "Ratings guests left about the property itself",
   "reviews.refresh": "Refresh",
+  "reviews.complaints": "Complaints",
+  "reviews.complaintsSubtitle": "Hygiene issues, missing amenities and guest notes",
+  "reviews.complaintsEmpty": "No complaints reported.",
+  "reviews.missingAmenities": "Missing amenities",
+  "reviews.hygienePhotos": "Hygiene photos",
+  "reviews.guestNotes": "Guest notes",
+  "reviews.cleanedBy": "Cleaned by",
+  "reviews.unknownCleaner": "Unassigned",
+  "reviews.room": "Room",
 
   "activity.title": "Activity",
   "activity.subtitle": "Everything you and your team have done, newest first",
@@ -122,10 +131,11 @@ const en = {
   "auth.updatePassword": "Update password",
   "auth.passwordUpdated": "Password updated. You can sign in now.",
   "auth.checkEmail": "Confirm your email address to finish signing up.",
-  "auth.inviteHint": "Have an invite code? Sign up first, then paste it in your account once you're signed in.",
-  "auth.verifyExpired": "Verification link expired after 5 minutes. Sign up again to get a new one.",
+  "auth.inviteHint":
+    "Have an invite code? Sign up first, then paste it in your account once you're signed in.",
+  "auth.verifyExpired":
+    "Verification link expired after 5 minutes. Sign up again to get a new one.",
   "auth.idleLogout": "Signed out after 15 minutes of inactivity.",
-
 
   "auth.usernameTaken": "That username is taken",
   "auth.usernameFree": "Username is available",
@@ -182,13 +192,16 @@ const en = {
   "dash.jobAssigned": "Cleaning job — cleaner assigned",
   "dash.jobNeedsCleaner": "Cleaning job — needs a cleaner",
   "prop.ownerOnly": "Owners only",
-  "prop.ownerOnlyHelp": "Property records are private to the owner. Your jobs and tasks show everything you need.",
-  "prop.amenitiesMoved": "Amenity checklists now live with your cleaning checklists, so one template covers both tasks and item counts.",
+  "prop.ownerOnlyHelp":
+    "Property records are private to the owner. Your jobs and tasks show everything you need.",
+  "prop.amenitiesMoved":
+    "Amenity checklists now live with your cleaning checklists, so one template covers both tasks and item counts.",
   "prop.amenitiesMovedCta": "Open checklist templates",
   "tpl.kindCleaning": "Cleaning checklist",
   "tpl.kindAmenity": "Amenity checklist",
   "tpl.amenityTitle": "Amenity checklist",
-  "tpl.amenityHelp": "Set the expected quantity of each item for a property. Cleaners count these items and photograph them during a clean.",
+  "tpl.amenityHelp":
+    "Set the expected quantity of each item for a property. Cleaners count these items and photograph them during a clean.",
   "dash.welcome": "Welcome back",
   "dash.properties": "Properties",
   "dash.team": "Team members",
@@ -269,7 +282,8 @@ const en = {
   "clean.jobSubmitted": "Job submitted for review.",
   "clean.noJobs": "No cleaning jobs assigned to you.",
 
-  "shop.qrEncrypted": "The QR image is encrypted and stored in the database. It stays until you replace or delete it.",
+  "shop.qrEncrypted":
+    "The QR image is encrypted and stored in the database. It stays until you replace or delete it.",
   "shop.replaceQr": "Replace QR code",
   "shop.deleteQr": "Delete QR code",
   "shop.qrDeleted": "QR code deleted.",
@@ -290,7 +304,8 @@ const en = {
   "clean.itemDone": "Done",
 
   "amen.title": "Amenity checklist templates",
-  "amen.help": "Build reusable amenity lists with reference photos, then apply them to any property.",
+  "amen.help":
+    "Build reusable amenity lists with reference photos, then apply them to any property.",
   "amen.new": "New amenity template",
   "amen.edit": "Edit amenity template",
   "amen.items": "Amenity items",
@@ -410,7 +425,8 @@ const en = {
   "guest.requestThanks": "Your request was sent to the host.",
   "guest.cart": "Your order",
   "guest.payTitle": "Pay the host",
-  "guest.payHelp": "Scan the host's QR code, pay, then upload a photo of your payment and type in the amount.",
+  "guest.payHelp":
+    "Scan the host's QR code, pay, then upload a photo of your payment and type in the amount.",
   "guest.amountPaid": "Amount you paid",
   "guest.uploadProof": "Upload payment proof",
   "guest.orderThanks": "Order sent. The host will confirm your payment.",
@@ -448,27 +464,35 @@ const en = {
   "landing.navFaq": "FAQ",
   "landing.featuresLabel": "Features",
   "landing.featuresTitle": "Everything you need to run your listings",
-  "landing.featuresBody": "From photo-verified cleans to guest requests and team coordination — all in one ledger.",
+  "landing.featuresBody":
+    "From photo-verified cleans to guest requests and team coordination — all in one ledger.",
   "landing.howLabel": "How it works",
   "landing.howTitle": "Get started in four steps",
   "landing.howBody": "From signup to your first verified clean in under 10 minutes.",
   "landing.how1Title": "Sign up & onboard",
-  "landing.how1Body": "Create your account, choose your role — owner, cleaner, worker, or cleaning company — and set up your group.",
+  "landing.how1Body":
+    "Create your account, choose your role — owner, cleaner, worker, or cleaning company — and set up your group.",
   "landing.how2Title": "Add properties & templates",
-  "landing.how2Body": "Import your listings, set amenity baselines, and build reusable cleaning checklists.",
+  "landing.how2Body":
+    "Import your listings, set amenity baselines, and build reusable cleaning checklists.",
   "landing.how3Title": "Invite your team",
-  "landing.how3Body": "Generate invite codes for cleaners, workers, or partner cleaning companies to join your group.",
+  "landing.how3Body":
+    "Generate invite codes for cleaners, workers, or partner cleaning companies to join your group.",
   "landing.how4Title": "Schedule & track",
-  "landing.how4Body": "Assign cleaning jobs, track progress with photo proof, and handle guest requests in real time.",
+  "landing.how4Body":
+    "Assign cleaning jobs, track progress with photo proof, and handle guest requests in real time.",
   "landing.testimonialsLabel": "Testimonials",
   "landing.testimonialsTitle": "Loved by hosts and teams",
-  "landing.testimonial1": "Keyward transformed how we manage our 12 listings. The photo-verified cleaning alone saved us countless disputes with guests.",
+  "landing.testimonial1":
+    "Keyward transformed how we manage our 12 listings. The photo-verified cleaning alone saved us countless disputes with guests.",
   "landing.testimonial1Auth": "Sarah Chen",
   "landing.testimonial1Role": "Airbnb Superhost, 12 properties",
-  "landing.testimonial2": "As a cleaning company owner, I love how I can assign jobs to my roster and see photo proof of every clean. It's a game-changer.",
+  "landing.testimonial2":
+    "As a cleaning company owner, I love how I can assign jobs to my roster and see photo proof of every clean. It's a game-changer.",
   "landing.testimonial2Auth": "Marcus Rivera",
   "landing.testimonial2Role": "CleanCo Pro, 25 cleaners",
-  "landing.testimonial3": "The amenity honesty check feature caught discrepancies we never would have noticed. Our guests are happier and our inventory is accurate.",
+  "landing.testimonial3":
+    "The amenity honesty check feature caught discrepancies we never would have noticed. Our guests are happier and our inventory is accurate.",
   "landing.testimonial3Auth": "Emma Thompson",
   "landing.testimonial3Role": "Property manager, 8 listings",
   "landing.pricingLabel": "Pricing",
@@ -503,19 +527,26 @@ const en = {
   "landing.faqLabel": "FAQ",
   "landing.faqTitle": "Frequently asked questions",
   "landing.faq1Q": "Is there a free trial?",
-  "landing.faq1A": "Yes! During our pilot phase, Keyward is completely free. You get access to all features with hard-coded team and property limits. No credit card required.",
+  "landing.faq1A":
+    "Yes! During our pilot phase, Keyward is completely free. You get access to all features with hard-coded team and property limits. No credit card required.",
   "landing.faq2Q": "Can I switch roles later?",
-  "landing.faq2A": "Your primary role is set at signup and cannot be changed. Choose carefully — if you're an owner, you manage properties and a team. If you're a cleaner or worker, you take on assigned jobs.",
+  "landing.faq2A":
+    "Your primary role is set at signup and cannot be changed. Choose carefully — if you're an owner, you manage properties and a team. If you're a cleaner or worker, you take on assigned jobs.",
   "landing.faq3Q": "How does photo-verified cleaning work?",
-  "landing.faq3A": "Cleaners receive a digital checklist with every item that needs attention. They tick items off and take photos as proof. Owners can review the photos before approving the job, ensuring nothing is missed.",
+  "landing.faq3A":
+    "Cleaners receive a digital checklist with every item that needs attention. They tick items off and take photos as proof. Owners can review the photos before approving the job, ensuring nothing is missed.",
   "landing.faq4Q": "Can I work with multiple owners or groups?",
-  "landing.faq4A": "Absolutely. Cleaners and workers can redeem invite codes from multiple owners and work for several groups at the same time. All your jobs appear in one unified inbox.",
+  "landing.faq4A":
+    "Absolutely. Cleaners and workers can redeem invite codes from multiple owners and work for several groups at the same time. All your jobs appear in one unified inbox.",
   "landing.faq5Q": "How do guests interact with the platform?",
-  "landing.faq5A": "Guests don't need to create an account. They open a unique link for their property, type in a stay code, and can report room conditions, submit special requests, or order supplies — all without logging in.",
+  "landing.faq5A":
+    "Guests don't need to create an account. They open a unique link for their property, type in a stay code, and can report room conditions, submit special requests, or order supplies — all without logging in.",
   "landing.faq6Q": "What happens when I exceed pilot limits?",
-  "landing.faq6A": "During the pilot, hard limits are enforced. Once we launch paid plans, you'll be able to upgrade seamlessly without losing any data or interrupting your operations.",
+  "landing.faq6A":
+    "During the pilot, hard limits are enforced. Once we launch paid plans, you'll be able to upgrade seamlessly without losing any data or interrupting your operations.",
   "landing.ctaTitle": "Ready to streamline your operations?",
-  "landing.ctaBody": "Join hundreds of hosts and teams already using Keyward to manage their listings, cleans, and guest requests from one place.",
+  "landing.ctaBody":
+    "Join hundreds of hosts and teams already using Keyward to manage their listings, cleans, and guest requests from one place.",
   "landing.footerBody": "One ledger for every listing, every clean, and every guest request.",
   "landing.footerProduct": "Product",
   "landing.footerCompany": "Company",
@@ -539,7 +570,8 @@ const en = {
   "people.reveal": "Reveal details",
   "people.hide": "Hide details",
   "people.encrypted": "Encrypted — visible to you as group owner",
-  "people.inviteHint": "Share a code with the person you want to add. They redeem it after signing up.",
+  "people.inviteHint":
+    "Share a code with the person you want to add. They redeem it after signing up.",
 
   "tpl.title": "Checklist templates",
   "tpl.new": "New template",
@@ -592,7 +624,8 @@ const en = {
 
   "profile.account": "Account",
   "profile.personal": "Personal details",
-  "profile.encryptedNote": "Encrypted before it is stored. Only you and your group owner can read it.",
+  "profile.encryptedNote":
+    "Encrypted before it is stored. Only you and your group owner can read it.",
   "profile.fullName": "Full legal name",
   "profile.idNumber": "IC / passport number",
   "profile.phone": "Phone number",
@@ -620,14 +653,16 @@ const en = {
   "nav.myHires": "Who hired me",
   "shop.sectionToggle": "Switch between shopping and special requests",
 
-  "req.about": "Special requests are extras a guest asks for during their stay — sent from the guest page of the property they are checked into.",
+  "req.about":
+    "Special requests are extras a guest asks for during their stay — sent from the guest page of the property they are checked into.",
   "req.about1": "Guests raise a request; it lands here as Open.",
   "req.about2": "Assign it to a worker and the status becomes Assigned.",
   "req.about3": "Mark it resolved once the guest has what they asked for.",
   "req.empty": "No special requests yet. They appear here as soon as a guest sends one.",
 
   "people.myHires": "Who hired me",
-  "people.myHiresHelp": "Every owner group you currently work for. You can work for more than one at a time.",
+  "people.myHiresHelp":
+    "Every owner group you currently work for. You can work for more than one at a time.",
   "people.noHires": "No owner has hired you yet. Redeem an invite code to join one.",
   "people.joinAnother": "Join another owner",
   "people.joinAnotherHelp": "Paste an invite code from another owner to work for them as well.",
@@ -637,7 +672,8 @@ const en = {
   "profile.previewHint": "Press the gear icon above to change any of these details.",
   "profile.nameOncePerWeek": "Your name can be changed once every 7 days.",
   "profile.nameLocked": "Name change locked until the 7-day window is over",
-  "profile.passwordEmailNote": "A confirmation email is sent to your address whenever the password changes.",
+  "profile.passwordEmailNote":
+    "A confirmation email is sent to your address whenever the password changes.",
   "profile.passwordChangedEmail": "Password updated. We emailed you a confirmation link.",
 
   "avatar.label": "Profile picture",
@@ -646,7 +682,8 @@ const en = {
   "avatar.help": "Shown as a circle across the app. JPG or PNG, up to 8 MB.",
   "avatar.tooLarge": "Image must be under 8 MB",
   "avatar.cropTitle": "Position your picture",
-  "avatar.cropHelp": "Only what stays inside the circle is kept. Drag to place your face and zoom to fit.",
+  "avatar.cropHelp":
+    "Only what stays inside the circle is kept. Drag to place your face and zoom to fit.",
   "avatar.zoom": "Zoom",
   "avatar.save": "Use this picture",
 };
@@ -654,6 +691,15 @@ const en = {
 type Dict = typeof en;
 
 const zhHans: Partial<Dict> = {
+  "reviews.complaints": "投诉",
+  "reviews.complaintsSubtitle": "卫生问题、用品缺失与住客留言",
+  "reviews.complaintsEmpty": "暂无投诉。",
+  "reviews.missingAmenities": "用品缺失",
+  "reviews.hygienePhotos": "卫生照片",
+  "reviews.guestNotes": "住客留言",
+  "reviews.cleanedBy": "清洁人员",
+  "reviews.unknownCleaner": "未指派",
+  "reviews.room": "房间",
   "clean.jobsMirrored": "每个已排期的清洁也会出现在任务中，并标记为清洁任务。",
   "clean.viewAll": "查看全部任务",
   "clean.historyTitle": "清洁任务历史",
@@ -1029,7 +1075,8 @@ const zhHans: Partial<Dict> = {
   "landing.f1": "带照片核验的清洁",
   "landing.f1Body": "清洁员按指派时生成的清单快照逐项打勾，并随手附上照片。",
   "landing.f2": "物品诚信盘点",
-  "landing.f2Body": "房东、清洁员与客人都可盘点同一份清单，数量不符会自动标记，并记录是谁、在何时上报。",
+  "landing.f2Body":
+    "房东、清洁员与客人都可盘点同一份清单，数量不符会自动标记，并记录是谁、在何时上报。",
   "landing.f3": "自有或外包",
   "landing.f3Body": "可以指派给自己的清洁员，也可以发给合作的清洁公司，由其从名册中派人。",
   "landing.f4": "免登录的客人流程",
@@ -1061,13 +1108,16 @@ const zhHans: Partial<Dict> = {
   "landing.how4Body": "指派清洁任务，通过照片核验追踪进度，实时处理客人请求。",
   "landing.testimonialsLabel": "用户评价",
   "landing.testimonialsTitle": "深受房东与团队喜爱",
-  "landing.testimonial1": "Keyward 彻底改变了我们管理 12 套房源的方式。光是带照片核验的清洁功能就帮我们避免了无数与客人的纠纷。",
+  "landing.testimonial1":
+    "Keyward 彻底改变了我们管理 12 套房源的方式。光是带照片核验的清洁功能就帮我们避免了无数与客人的纠纷。",
   "landing.testimonial1Auth": "Sarah Chen",
   "landing.testimonial1Role": "Airbnb 超赞房东，12 套房源",
-  "landing.testimonial2": "作为清洁公司老板，我可以指派任务给我的名册清洁员，并看到每次清洁的照片证明。这太棒了。",
+  "landing.testimonial2":
+    "作为清洁公司老板，我可以指派任务给我的名册清洁员，并看到每次清洁的照片证明。这太棒了。",
   "landing.testimonial2Auth": "Marcus Rivera",
   "landing.testimonial2Role": "CleanCo Pro，25 名清洁员",
-  "landing.testimonial3": "物品诚信盘点功能帮我们发现了从未注意到的差异。客人更满意了，我们的库存也更准确了。",
+  "landing.testimonial3":
+    "物品诚信盘点功能帮我们发现了从未注意到的差异。客人更满意了，我们的库存也更准确了。",
   "landing.testimonial3Auth": "Emma Thompson",
   "landing.testimonial3Role": "物业经理，8 套房源",
   "landing.pricingLabel": "定价",
@@ -1102,17 +1152,23 @@ const zhHans: Partial<Dict> = {
   "landing.faqLabel": "常见问题",
   "landing.faqTitle": "常见问题解答",
   "landing.faq1Q": "有免费试用吗？",
-  "landing.faq1A": "有的！在试点阶段，Keyward 完全免费。你可以使用所有功能，仅设有硬性的团队和房源上限。无需信用卡。",
+  "landing.faq1A":
+    "有的！在试点阶段，Keyward 完全免费。你可以使用所有功能，仅设有硬性的团队和房源上限。无需信用卡。",
   "landing.faq2Q": "以后可以更改身份吗？",
-  "landing.faq2A": "你的主要身份在注册时设定，之后无法更改。请谨慎选择——如果你是房东，你管理房源和团队；如果你是清洁员或跑腿人员，你承接指派的任务。",
+  "landing.faq2A":
+    "你的主要身份在注册时设定，之后无法更改。请谨慎选择——如果你是房东，你管理房源和团队；如果你是清洁员或跑腿人员，你承接指派的任务。",
   "landing.faq3Q": "带照片核验的清洁如何运作？",
-  "landing.faq3A": "清洁员会收到一份数字清单，列出需要关注的每个项目。他们逐项打勾并拍照作为证明。房东可以在批准前查看照片，确保没有遗漏。",
+  "landing.faq3A":
+    "清洁员会收到一份数字清单，列出需要关注的每个项目。他们逐项打勾并拍照作为证明。房东可以在批准前查看照片，确保没有遗漏。",
   "landing.faq4Q": "可以同时为多位房东或多个团队工作吗？",
-  "landing.faq4A": "当然可以。清洁员和跑腿人员可以兑换多位房东的邀请码，同时为多个团队工作。所有任务都会显示在一个统一收件箱中。",
+  "landing.faq4A":
+    "当然可以。清洁员和跑腿人员可以兑换多位房东的邀请码，同时为多个团队工作。所有任务都会显示在一个统一收件箱中。",
   "landing.faq5Q": "客人如何与平台互动？",
-  "landing.faq5A": "客人无需创建账号。他们打开房源专属链接，输入入住代码，就可以反馈房况、提交特殊请求或下单代购——全部无需登录。",
+  "landing.faq5A":
+    "客人无需创建账号。他们打开房源专属链接，输入入住代码，就可以反馈房况、提交特殊请求或下单代购——全部无需登录。",
   "landing.faq6Q": "超过试点限制会怎样？",
-  "landing.faq6A": "试点阶段会强制执行硬性上限。当我们推出付费方案后，你可以无缝升级，不会丢失任何数据或中断运营。",
+  "landing.faq6A":
+    "试点阶段会强制执行硬性上限。当我们推出付费方案后，你可以无缝升级，不会丢失任何数据或中断运营。",
   "landing.ctaTitle": "准备好简化运营了吗？",
   "landing.ctaBody": "加入数百位已经使用 Keyward 在统一平台管理房源、清洁和客人请求的房东与团队。",
   "landing.footerBody": "同一本台账管理每一处房源、每一次清洁和每一个客人请求。",
@@ -1155,6 +1211,15 @@ const zhHans: Partial<Dict> = {
 };
 
 const zhHant: Partial<Dict> = {
+  "reviews.complaints": "投訴",
+  "reviews.complaintsSubtitle": "衛生問題、備品缺失與住客留言",
+  "reviews.complaintsEmpty": "目前沒有投訴。",
+  "reviews.missingAmenities": "備品缺失",
+  "reviews.hygienePhotos": "衛生照片",
+  "reviews.guestNotes": "住客留言",
+  "reviews.cleanedBy": "清潔人員",
+  "reviews.unknownCleaner": "未指派",
+  "reviews.room": "房間",
   "nav.activity": "活動記錄",
   "nav.reviews": "評價",
   "activity.title": "活動記錄",
@@ -1306,7 +1371,8 @@ const zhHant: Partial<Dict> = {
   "guest.title": "歡迎入住",
   "guest.buy": "代購商品",
   "landing.heroTitle": "房源、清潔與客人請求，都在同一本帳簿裡。",
-  "landing.heroBody": "Keyward 讓民宿房東擁有統一的營運視角：附照片核驗的清潔、物品誠信盤點、客人請求，以及自有或外包的清潔團隊。",
+  "landing.heroBody":
+    "Keyward 讓民宿房東擁有統一的營運視角：附照片核驗的清潔、物品誠信盤點、客人請求，以及自有或外包的清潔團隊。",
   "landing.heroBadge": "試營運版 — 加入等候清單",
   "landing.heroFootnote": "無需信用卡。試營運期間免費使用，團隊規模設有硬性上限。",
   "landing.cta": "立即開始",
@@ -1335,13 +1401,16 @@ const zhHant: Partial<Dict> = {
   "landing.how4Body": "指派清潔任務，透過照片核驗追蹤進度，即時處理客人請求。",
   "landing.testimonialsLabel": "使用者評價",
   "landing.testimonialsTitle": "深受房東與團隊喜愛",
-  "landing.testimonial1": "Keyward 徹底改變了我們管理 12 套房源的方式。光是附照片核驗的清潔功能就幫我們避免了無數與客人的糾紛。",
+  "landing.testimonial1":
+    "Keyward 徹底改變了我們管理 12 套房源的方式。光是附照片核驗的清潔功能就幫我們避免了無數與客人的糾紛。",
   "landing.testimonial1Auth": "Sarah Chen",
   "landing.testimonial1Role": "Airbnb 超讚房東，12 套房源",
-  "landing.testimonial2": "作為清潔公司老闆，我可以指派任務給名冊中的清潔員，並看到每次清潔的照片證明。這太棒了。",
+  "landing.testimonial2":
+    "作為清潔公司老闆，我可以指派任務給名冊中的清潔員，並看到每次清潔的照片證明。這太棒了。",
   "landing.testimonial2Auth": "Marcus Rivera",
   "landing.testimonial2Role": "CleanCo Pro，25 名清潔員",
-  "landing.testimonial3": "物品誠信盤點功能幫我們發現了從未注意到的差異。客人更滿意了，庫存也更準確了。",
+  "landing.testimonial3":
+    "物品誠信盤點功能幫我們發現了從未注意到的差異。客人更滿意了，庫存也更準確了。",
   "landing.testimonial3Auth": "Emma Thompson",
   "landing.testimonial3Role": "物業經理，8 套房源",
   "landing.pricingLabel": "定價",
@@ -1376,17 +1445,23 @@ const zhHant: Partial<Dict> = {
   "landing.faqLabel": "常見問題",
   "landing.faqTitle": "常見問題解答",
   "landing.faq1Q": "有免費試用嗎？",
-  "landing.faq1A": "有的！在試營運階段，Keyward 完全免費。你可以使用所有功能，僅設有硬性的團隊和房源上限。無需信用卡。",
+  "landing.faq1A":
+    "有的！在試營運階段，Keyward 完全免費。你可以使用所有功能，僅設有硬性的團隊和房源上限。無需信用卡。",
   "landing.faq2Q": "以後可以更改身分嗎？",
-  "landing.faq2A": "你的主要身分在註冊時設定，之後無法更改。請謹慎選擇——如果你是房東，你管理房源和團隊；如果你是清潔員或跑腿人員，你承接指派的任務。",
+  "landing.faq2A":
+    "你的主要身分在註冊時設定，之後無法更改。請謹慎選擇——如果你是房東，你管理房源和團隊；如果你是清潔員或跑腿人員，你承接指派的任務。",
   "landing.faq3Q": "附照片核驗的清潔如何運作？",
-  "landing.faq3A": "清潔員會收到一份數位清單，列出需要關注的每個項目。他們逐項打勾並拍照作為證明。房東可以在批准前查看照片，確保沒有遺漏。",
+  "landing.faq3A":
+    "清潔員會收到一份數位清單，列出需要關注的每個項目。他們逐項打勾並拍照作為證明。房東可以在批准前查看照片，確保沒有遺漏。",
   "landing.faq4Q": "可以同時為多位房東或多個團隊工作嗎？",
-  "landing.faq4A": "當然可以。清潔員和跑腿人員可以兌換多位房東的邀請碼，同時為多個團隊工作。所有任務都會顯示在一個統一收件匣中。",
+  "landing.faq4A":
+    "當然可以。清潔員和跑腿人員可以兌換多位房東的邀請碼，同時為多個團隊工作。所有任務都會顯示在一個統一收件匣中。",
   "landing.faq5Q": "客人如何與平台互動？",
-  "landing.faq5A": "客人無需建立帳號。他們打開房源專屬連結，輸入入住代碼，就可以反饋房況、提交特殊請求或下單代購——全部無需登入。",
+  "landing.faq5A":
+    "客人無需建立帳號。他們打開房源專屬連結，輸入入住代碼，就可以反饋房況、提交特殊請求或下單代購——全部無需登入。",
   "landing.faq6Q": "超過試營運限制會怎樣？",
-  "landing.faq6A": "試營運階段會強制執行硬性上限。當我們推出付費方案後，你可以無縫升級，不會遺失任何資料或中斷營運。",
+  "landing.faq6A":
+    "試營運階段會強制執行硬性上限。當我們推出付費方案後，你可以無縫升級，不會遺失任何資料或中斷營運。",
   "landing.ctaTitle": "準備好簡化營運了嗎？",
   "landing.ctaBody": "加入數百位已經使用 Keyward 在統一平台管理房源、清潔和客人請求的房東與團隊。",
   "landing.footerBody": "同一本帳簿管理每一處房源、每一次清潔和每一個客人請求。",
@@ -1396,7 +1471,8 @@ const zhHant: Partial<Dict> = {
   "landing.f1": "附照片核驗的清潔",
   "landing.f1Body": "清潔員按指派時產生的清單快照逐項打勾，並隨手附上照片。",
   "landing.f2": "物品誠信盤點",
-  "landing.f2Body": "房東、清潔員與客人都可盤點同一份清單，數量不符會自動標記，並記錄是誰、在何時回報。",
+  "landing.f2Body":
+    "房東、清潔員與客人都可盤點同一份清單，數量不符會自動標記，並記錄是誰、在何時回報。",
   "landing.f3": "自有或外包",
   "landing.f3Body": "可以指派給自己的清潔員，也可以發給合作的清潔公司，由其從名冊中派人。",
   "landing.f4": "免登入的客人流程",

@@ -48,7 +48,10 @@ function Page() {
       const { data: groups } = await supabase
         .from("owner_groups")
         .select("id, name, owner_user_id")
-        .in("id", data.map((a) => a.owner_group_id));
+        .in(
+          "id",
+          data.map((a) => a.owner_group_id),
+        );
 
       const ownerIds = Array.from(new Set((groups ?? []).map((g) => g.owner_user_id)));
       const { data: owners } = await supabase
@@ -76,7 +79,13 @@ function Page() {
     },
     onSuccess: async () => {
       setCode("");
-      await qc.invalidateQueries({ queryKey: ["hr-affil-list"] });
+      // "my-groups" drives the invite-code gate and the group switcher. Without
+      // refetching it here, a cleaning company that joins from this page stays
+      // gated until a full reload.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["hr-affil-list"] }),
+        qc.refetchQueries({ queryKey: ["my-groups"] }),
+      ]);
       toast.success(t("join.joined"));
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),

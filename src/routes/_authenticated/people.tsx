@@ -438,7 +438,7 @@ function MemberPeople() {
     onSuccess: async () => {
       setCode("");
       await Promise.all([
-        qc.invalidateQueries({ queryKey: ["my-groups"] }),
+        qc.refetchQueries({ queryKey: ["my-groups"] }),
         qc.invalidateQueries({ queryKey: ["my-hires"] }),
       ]);
       toast.success(t("join.joined"));

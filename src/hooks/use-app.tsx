@@ -80,11 +80,16 @@ export function useMyGroups() {
       for (const g of owned.data ?? []) push(g.id, g.name, "owner");
       for (const m of memberships.data ?? []) {
         const g = m.owner_groups as unknown as { id: string; name: string } | null;
+        // The embedded group can be null when RLS hides owner_groups from this
+        // user. The membership row itself is proof of access, so never drop it:
+        // dropping it left the user stuck on the invite-code gate forever.
         if (g) push(g.id, g.name, "member");
+        else if (m.owner_group_id) push(m.owner_group_id, m.owner_group_id.slice(0, 8), "member");
       }
       for (const a of hr.data ?? []) {
         const g = a.owner_groups as unknown as { id: string; name: string } | null;
         if (g) push(g.id, g.name, "hr");
+        else if (a.owner_group_id) push(a.owner_group_id, a.owner_group_id.slice(0, 8), "hr");
       }
       return groups;
     },
@@ -109,7 +114,9 @@ export function ActiveGroupProvider({ children }: { children: ReactNode }) {
     if (!groups || groups.length === 0) return;
     const stored = window.localStorage.getItem(STORAGE_KEY);
     const valid = stored && groups.some((g) => g.id === stored) ? stored : groups[0].id;
-    setGroupIdState((current) => (current && groups.some((g) => g.id === current) ? current : valid));
+    setGroupIdState((current) =>
+      current && groups.some((g) => g.id === current) ? current : valid,
+    );
   }, [groups]);
 
   const value = useMemo<ActiveGroupValue>(

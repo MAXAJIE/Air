@@ -16,10 +16,16 @@ type NotificationType =
   | "task_assigned"
   | "task_submitted"
   | "task_approved"
-  | "review_received";
+  | "review_received"
+  | "hygiene_complaint"
+  | "low_rating";
 
 export type NotificationPayload = {
   propertyId?: string;
+  submissionId?: string;
+  ratingId?: string;
+  rating?: number;
+  cleanerUserId?: string;
   jobId?: string;
   taskId?: string;
   orderId?: string;
@@ -50,7 +56,8 @@ export const NOTIF_TO_ROUTE: Record<NotificationType, string> = {
   job_submitted: "/cleaning",
   job_assigned: "/jobs",
   job_reviewed: "/jobs",
-  amenity_discrepancy: "/cleaning",
+  // Guest-reported problems live in the complaints section of the reviews page.
+  amenity_discrepancy: "/reviews",
   special_request: "/shop",
   payment_proof: "/shop",
   hr_request: "/inbox",
@@ -60,6 +67,8 @@ export const NOTIF_TO_ROUTE: Record<NotificationType, string> = {
   task_submitted: "/tasks",
   task_approved: "/tasks",
   review_received: "/reviews",
+  hygiene_complaint: "/reviews",
+  low_rating: "/reviews",
 };
 
 /**
@@ -77,8 +86,14 @@ export function notifUrl(notif: AppNotification): string {
     params.set("section", "requests");
   } else if (notif.type === "payment_proof") {
     params.set("section", "shop");
-  } else if (notif.type === "job_submitted" || notif.type === "amenity_discrepancy") {
+  } else if (notif.type === "job_submitted") {
     params.set("tab", "jobs");
+  } else if (
+    notif.type === "amenity_discrepancy" ||
+    notif.type === "hygiene_complaint" ||
+    notif.type === "low_rating"
+  ) {
+    params.set("section", "complaints");
   }
 
   if (notif.payload.propertyId) {
@@ -137,10 +152,7 @@ export function useMarkRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from("notifications")
-        .update({ read: true })
-        .eq("id", id);
+      const { error } = await supabase.from("notifications").update({ read: true }).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["unread-notifications"] }),
@@ -193,5 +205,3 @@ export function useMarkRouteRead() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["unread-notifications"] }),
   });
 }
-
-

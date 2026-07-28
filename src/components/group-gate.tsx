@@ -25,7 +25,7 @@ export function GroupGate({ role }: { role: AppRole }) {
       if (error) throw error;
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["my-groups"] });
+      await qc.refetchQueries({ queryKey: ["my-groups"] });
       toast.success(t("common.saved"));
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
@@ -37,7 +37,10 @@ export function GroupGate({ role }: { role: AppRole }) {
       if (error) throw error;
     },
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["my-groups"] });
+      // Await the refetch (not just an invalidate) so this gate unmounts as
+      // soon as the new membership/affiliation is visible.
+      await qc.refetchQueries({ queryKey: ["my-groups"] });
+      await qc.invalidateQueries({ queryKey: ["hr-affil-list"] });
       toast.success(t("join.joined"));
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
