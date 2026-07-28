@@ -15,7 +15,8 @@ type NotificationType =
   | "hr_job_reviewed"
   | "task_assigned"
   | "task_submitted"
-  | "task_approved";
+  | "task_approved"
+  | "review_received";
 
 export type NotificationPayload = {
   propertyId?: string;
@@ -58,6 +59,7 @@ export const NOTIF_TO_ROUTE: Record<NotificationType, string> = {
   task_assigned: "/tasks",
   task_submitted: "/tasks",
   task_approved: "/tasks",
+  review_received: "/reviews",
 };
 
 /**
@@ -122,6 +124,7 @@ export function computeBadges(notifications: AppNotification[]): BadgeMap {
   const badges: BadgeMap = {};
   for (const n of notifications) {
     const route = NOTIF_TO_ROUTE[n.type];
+    if (!route) continue;
     badges[route] = (badges[route] ?? 0) + 1;
   }
   return badges;

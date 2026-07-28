@@ -1,566 +1,903 @@
-diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/components/app-shell.tsx air-work/src/components/app-shell.tsx
---- a/src/components/app-shell.tsx	2026-07-27 13:00:41.938259432 +0000
-+++ b/src/components/app-shell.tsx	2026-07-27 13:06:36.345961911 +0000
-@@ -209,7 +209,7 @@
-                     onClick={() => {
-                       markRead.mutate(notif.id);
-                       setOpen(false);
--                      navigate({ to: notifUrl(notif) });
-+                      window.location.assign(notifUrl(notif));
-                     }}
-                   >
-                     <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
-diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/integrations/supabase/types.ts air-work/src/integrations/supabase/types.ts
---- a/src/integrations/supabase/types.ts	2026-07-27 11:54:51.000000000 +0000
-+++ b/src/integrations/supabase/types.ts	2026-07-27 13:05:49.523472490 +0000
-@@ -262,6 +262,7 @@
-           id: string
-           is_checked: boolean
-           photo_url: string | null
-+          requires_photo: boolean
-           sort_order: number
-         }
-         Insert: {
-@@ -270,6 +271,7 @@
-           id?: string
-           is_checked?: boolean
-           photo_url?: string | null
-+          requires_photo?: boolean
-           sort_order?: number
-         }
-         Update: {
-@@ -278,6 +280,7 @@
-           id?: string
-           is_checked?: boolean
-           photo_url?: string | null
-+          requires_photo?: boolean
-           sort_order?: number
-         }
-         Relationships: [
-@@ -621,6 +624,7 @@
-           id: string
-           payload: Json
-           read: boolean
-+          target_url: string | null
-           type: string
-           user_id: string
-         }
-@@ -629,6 +633,7 @@
-           id?: string
-           payload?: Json
-           read?: boolean
-+          target_url?: string | null
-           type: string
-           user_id: string
-         }
-@@ -637,6 +642,7 @@
-           id?: string
-           payload?: Json
-           read?: boolean
-+          target_url?: string | null
-           type?: string
-           user_id?: string
-         }
-diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/agencies.tsx air-work/src/routes/_authenticated/agencies.tsx
---- a/src/routes/_authenticated/agencies.tsx	2026-07-27 13:00:41.950877560 +0000
-+++ b/src/routes/_authenticated/agencies.tsx	2026-07-27 13:05:49.523898729 +0000
-@@ -30,9 +30,6 @@
-   const qc = useQueryClient();
-   const { data: user } = useAuthUser();
-   const { data: profile, isLoading: profileLoading } = useProfile();
--  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
--    return <Navigate to="/dashboard" replace />;
--  }
-   const [code, setCode] = useState("");
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.tsbuildinfo' '--exclude=.temp' a/src/components/app-shell.tsx b/src/components/app-shell.tsx
+--- a/src/components/app-shell.tsx	2026-07-27 14:58:36.832661670 +0000
++++ b/src/components/app-shell.tsx	2026-07-27 15:03:01.018184502 +0000
+@@ -7,6 +7,7 @@
+   ClipboardList,
+   Gauge,
+   Handshake,
++  History,
+   Inbox,
+   ListChecks,
+   LogOut,
+@@ -67,6 +68,7 @@
+     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
+     { to: "/performance", labelKey: "nav.performance", icon: TrendingUp },
+     { to: "/reviews", labelKey: "nav.reviews", icon: Star },
++    { to: "/activity", labelKey: "nav.activity", icon: History },
+     { to: "/profile", labelKey: "nav.profile", icon: User },
+   ],
+   cleaner: [
+@@ -76,6 +78,7 @@
+     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
+     { to: "/history", labelKey: "nav.history", icon: ListChecks },
+     { to: "/performance", labelKey: "nav.performance", icon: TrendingUp },
++    { to: "/activity", labelKey: "nav.activity", icon: History },
+     { to: "/profile", labelKey: "nav.profile", icon: User },
+   ],
+   worker: [
+@@ -84,6 +87,7 @@
+     { to: "/people", labelKey: "nav.myHires", icon: Users },
+     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
+     { to: "/history", labelKey: "nav.history", icon: ListChecks },
++    { to: "/activity", labelKey: "nav.activity", icon: History },
+     { to: "/profile", labelKey: "nav.profile", icon: User },
+   ],
+   hr_company: [
+@@ -93,6 +97,7 @@
+     { to: "/agencies", labelKey: "nav.agencies", icon: Handshake },
+     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
+     { to: "/reviews", labelKey: "nav.reviews", icon: Star },
++    { to: "/activity", labelKey: "nav.activity", icon: History },
+     { to: "/profile", labelKey: "nav.profile", icon: User },
+   ],
+ };
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.tsbuildinfo' '--exclude=.temp' a/src/hooks/use-notifications.ts b/src/hooks/use-notifications.ts
+--- a/src/hooks/use-notifications.ts	2026-07-27 14:58:36.838205530 +0000
++++ b/src/hooks/use-notifications.ts	2026-07-27 15:01:23.561724302 +0000
+@@ -15,7 +15,8 @@
+   | "hr_job_reviewed"
+   | "task_assigned"
+   | "task_submitted"
+-  | "task_approved";
++  | "task_approved"
++  | "review_received";
  
-   // HR company's active affiliations with owner groups
-@@ -87,6 +84,10 @@
+ export type NotificationPayload = {
+   propertyId?: string;
+@@ -58,6 +59,7 @@
+   task_assigned: "/tasks",
+   task_submitted: "/tasks",
+   task_approved: "/tasks",
++  review_received: "/reviews",
+ };
  
-   const affiliations = affilQ.data ?? [];
+ /**
+@@ -122,6 +124,7 @@
+   const badges: BadgeMap = {};
+   for (const n of notifications) {
+     const route = NOTIF_TO_ROUTE[n.type];
++    if (!route) continue;
+     badges[route] = (badges[route] ?? 0) + 1;
+   }
+   return badges;
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.tsbuildinfo' '--exclude=.temp' a/src/i18n/translations.ts b/src/i18n/translations.ts
+--- a/src/i18n/translations.ts	2026-07-27 14:58:36.838584301 +0000
++++ b/src/i18n/translations.ts	2026-07-27 15:02:28.850088811 +0000
+@@ -26,6 +26,7 @@
+   "nav.signOut": "Sign out",
+   "nav.history": "History",
+   "nav.reviews": "Reviews",
++  "nav.activity": "Activity",
  
-+  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
-+    return <Navigate to="/dashboard" replace />;
-+  }
+   "task.photoRequired": "Photo required",
+   "task.photoDone": "Photo added",
+@@ -40,6 +41,35 @@
+   "reviews.pickCleaner": "Choose a cleaner",
+   "reviews.forProperty": "For",
+   "reviews.on": "on",
++  "reviews.stays": "Stay reviews",
++  "reviews.staysSubtitle": "Ratings guests left about the property itself",
++  "reviews.refresh": "Refresh",
 +
-   if (affilQ.isLoading) {
-     return (
-       <>
-diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/cleaning.tsx air-work/src/routes/_authenticated/cleaning.tsx
---- a/src/routes/_authenticated/cleaning.tsx	2026-07-27 13:00:41.939595940 +0000
-+++ b/src/routes/_authenticated/cleaning.tsx	2026-07-27 13:05:49.523750590 +0000
-@@ -284,14 +284,6 @@
++  "activity.title": "Activity",
++  "activity.subtitle": "Everything you and your team have done, newest first",
++  "activity.empty": "No activity recorded yet.",
++  "activity.mine": "My activity",
++  "activity.all": "Everyone",
++  "activity.action.job_created": "Created a cleaning job",
++  "activity.action.job_assigned": "Assigned a cleaning job",
++  "activity.action.job_in_progress": "Started a cleaning job",
++  "activity.action.job_submitted": "Submitted a cleaning job",
++  "activity.action.job_reviewed": "Reviewed a cleaning job",
++  "activity.action.task_created": "Created a task",
++  "activity.action.task_assigned": "Assigned a task",
++  "activity.action.task_submitted": "Submitted a task",
++  "activity.action.task_done": "Completed a task",
++  "activity.action.order_created": "New shopping order",
++  "activity.action.order_proof_submitted": "Payment proof submitted",
++  "activity.action.order_verified": "Verified an order payment",
++  "activity.action.order_assigned": "Assigned an order to a worker",
++  "activity.action.order_fulfilled": "Fulfilled an order",
++  "activity.action.review_received": "Received a guest review",
++  "activity.action.special_request_created": "New special request",
++  "activity.action.member_joined": "Member joined",
++  "activity.action.member_removed": "Member removed",
++  "activity.action.company_joined": "Cleaning company joined",
++  "activity.action.company_removed": "Cleaning company removed",
  
-   const review = useMutation({
-     mutationFn: async (id: string) => {
--      // Fetch the job to get the assigned cleaner and HR company before updating
--      const { data: job, error: fetchErr } = await supabase
--        .from("cleaning_jobs")
--        .select("id, assigned_to_user_id, assigned_hr_company_id, property_id")
--        .eq("id", id)
--        .single();
--      if (fetchErr) throw fetchErr;
--
-       // Mark the cleaning job as reviewed
-       const { error } = await supabase.from("cleaning_jobs").update({ status: "reviewed" }).eq("id", id);
-       if (error) throw error;
-@@ -302,25 +294,10 @@
-         .update({ status: "done" })
-         .eq("cleaning_job_id", id);
-       if (tErr) throw tErr;
--
--      // Notify the cleaner that their job was reviewed
--      if (job.assigned_to_user_id) {
--        const { error: nErr } = await supabase.from("notifications").insert({
--          user_id: job.assigned_to_user_id,
--          type: "job_reviewed",
--          payload: { jobId: id, propertyId: job.property_id },
--        });
--        if (nErr) throw nErr;
--      }
--      // Notify the HR company that the job was reviewed
--      if (job.assigned_hr_company_id) {
--        const { error: nErr } = await supabase.from("notifications").insert({
--          user_id: job.assigned_hr_company_id,
--          type: "hr_job_reviewed",
--          payload: { jobId: id, propertyId: job.property_id },
--        });
--        if (nErr) throw nErr;
--      }
-+      // Review notifications are emitted by the DB trigger
-+      // trg_notify_job_reviewed. Client-side INSERTs into public.notifications
-+      // are intentionally blocked by RLS and would make a successful review look
-+      // like a failed schedule/review action.
-     },
-     onSuccess: async () => {
-       await qc.invalidateQueries({ queryKey: ["jobs", groupId] });
-diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/dashboard.tsx air-work/src/routes/_authenticated/dashboard.tsx
---- a/src/routes/_authenticated/dashboard.tsx	2026-07-27 11:54:51.000000000 +0000
-+++ b/src/routes/_authenticated/dashboard.tsx	2026-07-27 13:05:49.523637476 +0000
-@@ -210,18 +210,6 @@
-     },
-   });
+   "common.save": "Save",
+   "common.cancel": "Cancel",
+@@ -693,6 +723,13 @@
+   "nav.inbox": "任务收件箱",
+   "nav.profile": "个人资料",
+   "nav.signOut": "退出登录",
++  "nav.activity": "活动记录",
++  "nav.reviews": "评价",
++  "activity.title": "活动记录",
++  "activity.subtitle": "你与团队的所有操作，最新在前",
++  "activity.empty": "暂无活动记录。",
++  "activity.mine": "我的记录",
++  "activity.all": "全部成员",
  
--  if (isLoading) {
--    return (
--      <>
--        <StatsSkeleton count={4} />
--        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
--          <ListSkeleton rows={4} />
--          <ListSkeleton rows={5} />
--        </div>
--      </>
--    );
--  }
--
-   const stats = useMemo(() => {
-     const properties = data?.properties ?? [];
-     const statusById = new Map((data?.statuses ?? []).map((s) => [s.id, s.label]));
-@@ -260,6 +248,18 @@
-     }));
-   }, [data, t]);
+   "common.save": "保存",
+   "common.cancel": "取消",
+@@ -1118,6 +1155,13 @@
+ };
  
-+  if (isLoading) {
-+    return (
-+      <>
-+        <StatsSkeleton count={4} />
-+        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-+          <ListSkeleton rows={4} />
-+          <ListSkeleton rows={5} />
-+        </div>
-+      </>
-+    );
-+  }
+ const zhHant: Partial<Dict> = {
++  "nav.activity": "活動記錄",
++  "nav.reviews": "評價",
++  "activity.title": "活動記錄",
++  "activity.subtitle": "你與團隊的所有操作，最新在前",
++  "activity.empty": "暫無活動記錄。",
++  "activity.mine": "我的記錄",
++  "activity.all": "全部成員",
+   "clean.jobsMirrored": "每個已排期的清潔也會出現在任務中，並標記為清潔任務。",
+   "clean.jobIncomplete": "排期清潔需填寫全部四項資訊。缺少：",
+   "clean.jobCreated": "清潔已排期。",
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.tsbuildinfo' '--exclude=.temp' a/src/integrations/supabase/types.ts b/src/integrations/supabase/types.ts
+--- a/src/integrations/supabase/types.ts	2026-07-27 14:58:36.839155703 +0000
++++ b/src/integrations/supabase/types.ts	2026-07-27 15:01:58.738690297 +0000
+@@ -14,6 +14,47 @@
+   }
+   public: {
+     Tables: {
++      activity_log: {
++        Row: {
++          action: string
++          actor_user_id: string | null
++          created_at: string
++          entity_id: string | null
++          entity_type: string
++          id: string
++          meta: Json
++          owner_group_id: string | null
++        }
++        Insert: {
++          action: string
++          actor_user_id?: string | null
++          created_at?: string
++          entity_id?: string | null
++          entity_type: string
++          id?: string
++          meta?: Json
++          owner_group_id?: string | null
++        }
++        Update: {
++          action?: string
++          actor_user_id?: string | null
++          created_at?: string
++          entity_id?: string | null
++          entity_type?: string
++          id?: string
++          meta?: Json
++          owner_group_id?: string | null
++        }
++        Relationships: [
++          {
++            foreignKeyName: "activity_log_owner_group_id_fkey"
++            columns: ["owner_group_id"]
++            isOneToOne: false
++            referencedRelation: "owner_groups"
++            referencedColumns: ["id"]
++          },
++        ]
++      }
+       amenity_checks: {
+         Row: {
+           actual_qty: number
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.tsbuildinfo' '--exclude=.temp' a/src/routeTree.gen.ts b/src/routeTree.gen.ts
+--- a/src/routeTree.gen.ts	2026-07-27 14:58:36.841046486 +0000
++++ b/src/routeTree.gen.ts	2026-07-27 15:04:28.506501990 +0000
+@@ -21,6 +21,8 @@
+ import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
+ import { Route as AuthenticatedJobsRouteImport } from './routes/_authenticated/jobs'
+ import { Route as AuthenticatedPeopleRouteImport } from './routes/_authenticated/people'
++import { Route as AuthenticatedReviewsRouteImport } from './routes/_authenticated/reviews'
++import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
+ import { Route as AuthenticatedPerformanceRouteImport } from './routes/_authenticated/performance'
+ import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
+ import { Route as AuthenticatedRequestsRouteImport } from './routes/_authenticated/requests'
+@@ -92,6 +94,16 @@
+   path: '/people',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
++const AuthenticatedReviewsRoute = AuthenticatedReviewsRouteImport.update({
++  id: '/reviews',
++  path: '/reviews',
++  getParentRoute: () => AuthenticatedRouteRoute,
++} as any)
++const AuthenticatedActivityRoute = AuthenticatedActivityRouteImport.update({
++  id: '/activity',
++  path: '/activity',
++  getParentRoute: () => AuthenticatedRouteRoute,
++} as any)
+ const AuthenticatedPerformanceRoute =
+   AuthenticatedPerformanceRouteImport.update({
+     id: '/performance',
+@@ -159,6 +171,8 @@
+   '/inbox': typeof AuthenticatedInboxRoute
+   '/jobs': typeof AuthenticatedJobsRoute
+   '/people': typeof AuthenticatedPeopleRoute
++  '/reviews': typeof AuthenticatedReviewsRoute
++  '/activity': typeof AuthenticatedActivityRoute
+   '/performance': typeof AuthenticatedPerformanceRoute
+   '/profile': typeof AuthenticatedProfileRoute
+   '/requests': typeof AuthenticatedRequestsRoute
+@@ -182,6 +196,8 @@
+   '/inbox': typeof AuthenticatedInboxRoute
+   '/jobs': typeof AuthenticatedJobsRoute
+   '/people': typeof AuthenticatedPeopleRoute
++  '/reviews': typeof AuthenticatedReviewsRoute
++  '/activity': typeof AuthenticatedActivityRoute
+   '/performance': typeof AuthenticatedPerformanceRoute
+   '/profile': typeof AuthenticatedProfileRoute
+   '/requests': typeof AuthenticatedRequestsRoute
+@@ -207,6 +223,8 @@
+   '/_authenticated/inbox': typeof AuthenticatedInboxRoute
+   '/_authenticated/jobs': typeof AuthenticatedJobsRoute
+   '/_authenticated/people': typeof AuthenticatedPeopleRoute
++  '/_authenticated/reviews': typeof AuthenticatedReviewsRoute
++  '/_authenticated/activity': typeof AuthenticatedActivityRoute
+   '/_authenticated/performance': typeof AuthenticatedPerformanceRoute
+   '/_authenticated/profile': typeof AuthenticatedProfileRoute
+   '/_authenticated/requests': typeof AuthenticatedRequestsRoute
+@@ -232,6 +250,8 @@
+     | '/inbox'
+     | '/jobs'
+     | '/people'
++    | '/reviews'
++    | '/activity'
+     | '/performance'
+     | '/profile'
+     | '/requests'
+@@ -255,6 +275,8 @@
+     | '/inbox'
+     | '/jobs'
+     | '/people'
++    | '/reviews'
++    | '/activity'
+     | '/performance'
+     | '/profile'
+     | '/requests'
+@@ -279,6 +301,8 @@
+     | '/_authenticated/inbox'
+     | '/_authenticated/jobs'
+     | '/_authenticated/people'
++    | '/_authenticated/reviews'
++    | '/_authenticated/activity'
+     | '/_authenticated/performance'
+     | '/_authenticated/profile'
+     | '/_authenticated/requests'
+@@ -385,6 +409,20 @@
+       preLoaderRoute: typeof AuthenticatedPeopleRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
++    '/_authenticated/reviews': {
++      id: '/_authenticated/reviews'
++      path: '/reviews'
++      fullPath: '/reviews'
++      preLoaderRoute: typeof AuthenticatedReviewsRouteImport
++      parentRoute: typeof AuthenticatedRouteRoute
++    }
++    '/_authenticated/activity': {
++      id: '/_authenticated/activity'
++      path: '/activity'
++      fullPath: '/activity'
++      preLoaderRoute: typeof AuthenticatedActivityRouteImport
++      parentRoute: typeof AuthenticatedRouteRoute
++    }
+     '/_authenticated/performance': {
+       id: '/_authenticated/performance'
+       path: '/performance'
+@@ -467,6 +505,8 @@
+   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
+   AuthenticatedJobsRoute: typeof AuthenticatedJobsRoute
+   AuthenticatedPeopleRoute: typeof AuthenticatedPeopleRoute
++  AuthenticatedReviewsRoute: typeof AuthenticatedReviewsRoute
++  AuthenticatedActivityRoute: typeof AuthenticatedActivityRoute
+   AuthenticatedPerformanceRoute: typeof AuthenticatedPerformanceRoute
+   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
+   AuthenticatedRequestsRoute: typeof AuthenticatedRequestsRoute
+@@ -487,6 +527,8 @@
+   AuthenticatedInboxRoute: AuthenticatedInboxRoute,
+   AuthenticatedJobsRoute: AuthenticatedJobsRoute,
+   AuthenticatedPeopleRoute: AuthenticatedPeopleRoute,
++  AuthenticatedReviewsRoute: AuthenticatedReviewsRoute,
++  AuthenticatedActivityRoute: AuthenticatedActivityRoute,
+   AuthenticatedPerformanceRoute: AuthenticatedPerformanceRoute,
+   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
+   AuthenticatedRequestsRoute: AuthenticatedRequestsRoute,
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.tsbuildinfo' '--exclude=.temp' a/src/routes/_authenticated/activity.tsx b/src/routes/_authenticated/activity.tsx
+--- a/src/routes/_authenticated/activity.tsx	1970-01-01 00:00:00.000000000 +0000
++++ b/src/routes/_authenticated/activity.tsx	2026-07-27 15:02:47.989172670 +0000
+@@ -0,0 +1,130 @@
++import { useQuery, useQueryClient } from "@tanstack/react-query";
++import { createFileRoute } from "@tanstack/react-router";
++import { History } from "lucide-react";
++import { useEffect, useState } from "react";
 +
-   return (
-     <>
-       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/reviews.tsx air-work/src/routes/_authenticated/reviews.tsx
---- a/src/routes/_authenticated/reviews.tsx	1970-01-01 00:00:00.000000000 +0000
-+++ b/src/routes/_authenticated/reviews.tsx	2026-07-27 13:06:20.260243715 +0000
-@@ -0,0 +1,172 @@
-+import { useQuery } from "@tanstack/react-query";
-+import { Navigate, createFileRoute } from "@tanstack/react-router";
-+import { Building2, Star, UserRound } from "lucide-react";
-+
-+import { ListSkeleton, PageHeader, StatCard, StatsSkeleton } from "@/components/app-shell";
-+import { useActiveGroup, useProfile } from "@/hooks/use-app";
-+import { useT } from "@/i18n";
++import { ListSkeleton, PageHeader } from "@/components/app-shell";
++import { Button } from "@/components/ui/button";
++import { useActiveGroup, useAuthUser } from "@/hooks/use-app";
++import { useT, type TranslationKey } from "@/i18n";
 +import { supabase } from "@/integrations/supabase/client";
 +import { cn } from "@/lib/utils";
 +
-+export const Route = createFileRoute("/_authenticated/reviews")({
++export const Route = createFileRoute("/_authenticated/activity")({
 +  head: () => ({
 +    meta: [
-+      { title: "Reviews — Keyward" },
-+      { name: "description", content: "Guest ratings and cleaning feedback." },
-+      { property: "og:title", content: "Reviews — Keyward" },
-+      { property: "og:description", content: "Guest ratings and cleaning feedback." },
++      { title: "Activity — Keyward" },
++      { name: "description", content: "A record of everything you have done." },
++      { property: "og:title", content: "Activity — Keyward" },
++      { property: "og:description", content: "A record of everything you have done." },
 +      { name: "robots", content: "noindex" },
 +    ],
 +  }),
-+  component: ReviewsPage,
++  component: ActivityPage,
 +});
 +
-+type ReviewRow = {
++type ActivityRow = {
 +  id: string;
-+  cleaner_user_id: string;
-+  cleaning_job_id: string | null;
-+  property_id: string;
-+  rating: number;
-+  comment: string | null;
++  actor_user_id: string | null;
++  owner_group_id: string | null;
++  action: string;
++  entity_type: string;
++  entity_id: string | null;
 +  created_at: string;
 +};
 +
-+function ReviewsPage() {
++function ActivityPage() {
 +  const t = useT();
++  const qc = useQueryClient();
++  const { data: user } = useAuthUser();
 +  const { groupId } = useActiveGroup();
-+  const { data: profile, isLoading: profileLoading } = useProfile();
++  const [scope, setScope] = useState<"mine" | "all">("mine");
 +
-+  const reviewsQ = useQuery({
-+    queryKey: ["reviews", groupId],
-+    enabled: !!groupId,
++  const activityQ = useQuery({
++    queryKey: ["activity", user?.id, groupId, scope],
++    enabled: !!user?.id,
++    staleTime: 0,
++    refetchInterval: 20_000,
 +    queryFn: async () => {
-+      const { data: properties, error: propsError } = await supabase
-+        .from("properties")
-+        .select("id, name")
-+        .eq("owner_group_id", groupId!);
-+      if (propsError) throw propsError;
-+
-+      const propertyIds = (properties ?? []).map((property) => property.id);
-+      if (propertyIds.length === 0) {
-+        return { reviews: [] as ReviewRow[], properties: properties ?? [], cleaners: [] };
-+      }
-+
-+      const { data: reviews, error: reviewsError } = await supabase
-+        .from("cleaner_ratings")
-+        .select("id, cleaner_user_id, cleaning_job_id, property_id, rating, comment, created_at")
-+        .in("property_id", propertyIds)
-+        .order("created_at", { ascending: false });
-+      if (reviewsError) throw reviewsError;
-+
-+      const cleanerIds = Array.from(new Set((reviews ?? []).map((review) => review.cleaner_user_id)));
-+      const { data: cleaners } = cleanerIds.length
-+        ? await supabase
-+            .from("profiles")
-+            .select("user_id, display_name, username")
-+            .in("user_id", cleanerIds)
-+        : { data: [] };
-+
-+      return {
-+        reviews: (reviews ?? []) as ReviewRow[],
-+        properties: properties ?? [],
-+        cleaners: cleaners ?? [],
-+      };
++      let query = supabase
++        .from("activity_log")
++        .select("id, actor_user_id, owner_group_id, action, entity_type, entity_id, created_at")
++        .order("created_at", { ascending: false })
++        .limit(200);
++      if (scope === "mine") query = query.eq("actor_user_id", user!.id);
++      else if (groupId) query = query.eq("owner_group_id", groupId);
++      const { data, error } = await query;
++      if (error) throw error;
++      return (data ?? []) as ActivityRow[];
 +    },
 +  });
 +
-+  if (!profileLoading && profile?.primary_role !== "owner" && profile?.primary_role !== "hr_company") {
-+    return <Navigate to="/dashboard" replace />;
-+  }
++  // Keep the feed live so a fresh action shows up without a reload.
++  useEffect(() => {
++    const channel = supabase
++      .channel("activity-log-feed")
++      .on("postgres_changes", { event: "INSERT", schema: "public", table: "activity_log" }, () => {
++        qc.invalidateQueries({ queryKey: ["activity"] });
++      })
++      .subscribe();
++    return () => {
++      supabase.removeChannel(channel);
++    };
++  }, [qc]);
 +
-+  const reviews = reviewsQ.data?.reviews ?? [];
-+  const propertyName = (id: string) =>
-+    reviewsQ.data?.properties.find((property) => property.id === id)?.name ?? id.slice(0, 8);
-+  const cleanerName = (id: string) => {
-+    const cleaner = reviewsQ.data?.cleaners.find((person) => person.user_id === id);
-+    return cleaner?.display_name || cleaner?.username || id.slice(0, 8);
++  const label = (action: string) => {
++    const key = `activity.action.${action}` as TranslationKey;
++    const translated = t(key);
++    return translated === key ? action.replace(/_/g, " ") : translated;
 +  };
-+  const cleanerIds = Array.from(new Set(reviews.map((review) => review.cleaner_user_id)));
-+  const average = reviews.length
-+    ? (reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1)
-+    : "—";
++
++  const rows = activityQ.data ?? [];
 +
 +  return (
 +    <>
-+      <PageHeader title={t("reviews.title")} description={t("reviews.subtitle")} />
-+      {reviewsQ.isLoading ? (
-+        <div className="space-y-6">
-+          <StatsSkeleton count={3} />
-+          <ListSkeleton rows={6} />
-+        </div>
++      <PageHeader title={t("activity.title")} description={t("activity.subtitle")} />
++
++      <div className="mb-4 flex gap-2">
++        {(["mine", "all"] as const).map((value) => (
++          <Button
++            key={value}
++            size="sm"
++            variant={scope === value ? "default" : "outline"}
++            onClick={() => setScope(value)}
++          >
++            {t(value === "mine" ? "activity.mine" : "activity.all")}
++          </Button>
++        ))}
++      </div>
++
++      {activityQ.isLoading ? (
++        <ListSkeleton rows={8} />
++      ) : rows.length === 0 ? (
++        <section className="surface p-8 text-center text-sm text-muted-foreground">
++          {t("activity.empty")}
++        </section>
 +      ) : (
-+        <div className="space-y-6">
-+          <div className="grid gap-4 sm:grid-cols-3">
-+            <StatCard label={t("reviews.average")} value={average} icon={Star} delay={0} />
-+            <StatCard label={t("reviews.count")} value={reviews.length} icon={Building2} delay={80} />
-+            <StatCard label={t("reviews.pickCleaner")} value={cleanerIds.length} icon={UserRound} delay={160} />
-+          </div>
-+
-+          {cleanerIds.length === 0 ? (
-+            <section className="surface p-8 text-center text-sm text-muted-foreground">
-+              {t("reviews.empty")}
-+            </section>
-+          ) : (
-+            <div className="grid gap-4 lg:grid-cols-2">
-+              {cleanerIds.map((cleanerId, index) => {
-+                const cleanerReviews = reviews.filter((review) => review.cleaner_user_id === cleanerId);
-+                const cleanerAverage = (
-+                  cleanerReviews.reduce((sum, review) => sum + review.rating, 0) / cleanerReviews.length
-+                ).toFixed(1);
-+                return (
-+                  <section
-+                    key={cleanerId}
-+                    className="surface space-y-4 p-5 animate-card-enter"
-+                    style={{ animationDelay: `${index * 50}ms` }}
-+                  >
-+                    <header className="flex items-start justify-between gap-3">
-+                      <div className="min-w-0">
-+                        <h2 className="truncate text-lg">{cleanerName(cleanerId)}</h2>
-+                        <p className="text-sm text-muted-foreground">
-+                          {cleanerReviews.length} {t("reviews.count").toLowerCase()}
-+                        </p>
-+                      </div>
-+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
-+                        <Star className="h-4 w-4 fill-current" aria-hidden="true" />
-+                        {cleanerAverage}
-+                      </span>
-+                    </header>
-+
-+                    <ul className="divide-y divide-border text-sm">
-+                      {cleanerReviews.map((review) => (
-+                        <li key={review.id} className="space-y-2 py-3">
-+                          <div className="flex items-center justify-between gap-3">
-+                            <span className="min-w-0 truncate text-muted-foreground">
-+                              {t("reviews.forProperty")} {propertyName(review.property_id)} · {t("reviews.on")} {new Date(review.created_at).toLocaleDateString()}
-+                            </span>
-+                            <span className="flex shrink-0 items-center gap-0.5">
-+                              {Array.from({ length: 5 }, (_, star) => (
-+                                <Star
-+                                  key={star}
-+                                  className={cn(
-+                                    "h-3.5 w-3.5",
-+                                    star < review.rating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30",
-+                                  )}
-+                                  aria-hidden="true"
-+                                />
-+                              ))}
-+                            </span>
-+                          </div>
-+                          {review.comment && <p className="text-foreground">{review.comment}</p>}
-+                        </li>
-+                      ))}
-+                    </ul>
-+                  </section>
-+                );
-+              })}
-+            </div>
-+          )}
-+        </div>
++        <ol className="surface divide-y divide-border">
++          {rows.map((row, index) => (
++            <li
++              key={row.id}
++              className={cn(
++                "flex items-start gap-3 px-5 py-3 text-sm animate-card-enter",
++                row.actor_user_id === user?.id && "bg-muted/30",
++              )}
++              style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
++            >
++              <History className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
++              <div className="min-w-0 flex-1">
++                <p className="truncate">{label(row.action)}</p>
++                <p className="text-xs text-muted-foreground">
++                  {new Date(row.created_at).toLocaleString()}
++                </p>
++              </div>
++            </li>
++          ))}
++        </ol>
 +      )}
 +    </>
 +  );
 +}
 \ No newline at end of file
-diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/src/routes/_authenticated/roster.tsx air-work/src/routes/_authenticated/roster.tsx
---- a/src/routes/_authenticated/roster.tsx	2026-07-27 13:00:41.952143967 +0000
-+++ b/src/routes/_authenticated/roster.tsx	2026-07-27 13:05:49.523975769 +0000
-@@ -29,9 +29,6 @@
-   const qc = useQueryClient();
-   const { data: user } = useAuthUser();
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.tsbuildinfo' '--exclude=.temp' a/src/routes/_authenticated/people.tsx b/src/routes/_authenticated/people.tsx
+--- a/src/routes/_authenticated/people.tsx	2026-07-27 14:58:36.843082375 +0000
++++ b/src/routes/_authenticated/people.tsx	2026-07-27 15:01:35.701578094 +0000
+@@ -204,7 +204,8 @@
+         if (!looksMissing) throw error;
+         const { error: uErr } = await supabase
+           .from("hr_affiliations")
+-          .update({ status: "revoked" })
++          // membership_status only has 'active' | 'removed'.
++          .update({ status: "removed" })
+           .eq("owner_group_id", groupId!)
+           .eq("hr_company_user_id", hrUserId);
+         if (uErr) throw uErr;
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.tsbuildinfo' '--exclude=.temp' a/src/routes/_authenticated/reviews.tsx b/src/routes/_authenticated/reviews.tsx
+--- a/src/routes/_authenticated/reviews.tsx	2026-07-27 14:58:36.847455855 +0000
++++ b/src/routes/_authenticated/reviews.tsx	2026-07-27 15:03:29.085445623 +0000
+@@ -1,6 +1,7 @@
+-import { useQuery } from "@tanstack/react-query";
++import { useQuery, useQueryClient } from "@tanstack/react-query";
+ import { Navigate, createFileRoute } from "@tanstack/react-router";
+ import { Building2, Star, UserRound } from "lucide-react";
++import { useEffect } from "react";
+ 
+ import { ListSkeleton, PageHeader, StatCard, StatsSkeleton } from "@/components/app-shell";
+ import { useActiveGroup, useProfile } from "@/hooks/use-app";
+@@ -31,14 +32,29 @@
+   created_at: string;
+ };
+ 
++type StayReview = {
++  id: string;
++  property_id: string;
++  overall_rating: number | null;
++  notes: string | null;
++  submitted_at: string;
++};
++
+ function ReviewsPage() {
+   const t = useT();
++  const qc = useQueryClient();
+   const { groupId } = useActiveGroup();
    const { data: profile, isLoading: profileLoading } = useProfile();
--  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
--    return <Navigate to="/dashboard" replace />;
--  }
  
-   // Invite codes for joining this HR company's roster
-   const codesQ = useQuery({
-@@ -120,6 +117,10 @@
-   const roster = rosterQ.data ?? [];
-   const codes = codesQ.data ?? [];
+   const reviewsQ = useQuery({
+     queryKey: ["reviews", groupId],
+     enabled: !!groupId,
++    // Guest reviews land at unpredictable times: never serve a stale cache and
++    // poll as a safety net on top of the realtime subscription below.
++    staleTime: 0,
++    refetchOnMount: "always",
++    refetchOnWindowFocus: true,
++    refetchInterval: 20_000,
+     queryFn: async () => {
+       const { data: properties, error: propsError } = await supabase
+         .from("properties")
+@@ -48,7 +64,12 @@
  
-+  if (!profileLoading && profile && profile.primary_role !== "hr_company") {
-+    return <Navigate to="/dashboard" replace />;
-+  }
+       const propertyIds = (properties ?? []).map((property) => property.id);
+       if (propertyIds.length === 0) {
+-        return { reviews: [] as ReviewRow[], properties: properties ?? [], cleaners: [] };
++        return {
++          reviews: [] as ReviewRow[],
++          stays: [] as StayReview[],
++          properties: properties ?? [],
++          cleaners: [],
++        };
+       }
+ 
+       const { data: reviews, error: reviewsError } = await supabase
+@@ -58,6 +79,15 @@
+         .order("created_at", { ascending: false });
+       if (reviewsError) throw reviewsError;
+ 
++      // Guests can also rate the stay itself (room condition step). Those
++      // ratings never referenced a cleaner, so they were invisible here.
++      const { data: stays } = await supabase
++        .from("room_condition_submissions")
++        .select("id, property_id, overall_rating, notes, submitted_at")
++        .in("property_id", propertyIds)
++        .not("overall_rating", "is", null)
++        .order("submitted_at", { ascending: false });
 +
-   if (rosterQ.isLoading || codesQ.isLoading) {
-     return (
-       <>
-diff -ruN '--exclude=.git' '--exclude=node_modules' '--exclude=dist' '--exclude=.output' /tmp/air-work-before/supabase/migrations/20260808000000_remaining_runtime_fixes.sql air-work/supabase/migrations/20260808000000_remaining_runtime_fixes.sql
---- a/supabase/migrations/20260808000000_remaining_runtime_fixes.sql	1970-01-01 00:00:00.000000000 +0000
-+++ b/supabase/migrations/20260808000000_remaining_runtime_fixes.sql	2026-07-27 13:05:49.523556452 +0000
-@@ -0,0 +1,184 @@
-+-- Remaining runtime fixes after the bundled 0001-0004 patches.
-+-- - Scheduling a direct or HR cleaning job could fail inside notification
-+--   triggers because INSERT triggers referenced OLD.
-+-- - The frontend already reads notifications.target_url and
-+--   cleaning_job_items.requires_photo, so make those schema changes explicit.
-+-- - Reviews must be visible to affiliated HR companies without widening public
-+--   access to guest comments.
+       const cleanerIds = Array.from(new Set((reviews ?? []).map((review) => review.cleaner_user_id)));
+       const { data: cleaners } = cleanerIds.length
+         ? await supabase
+@@ -68,17 +98,39 @@
+ 
+       return {
+         reviews: (reviews ?? []) as ReviewRow[],
++        stays: (stays ?? []) as StayReview[],
+         properties: properties ?? [],
+         cleaners: cleaners ?? [],
+       };
+     },
+   });
+ 
++  // Live updates: a review submitted by a guest shows up without a reload.
++  useEffect(() => {
++    const channel = supabase
++      .channel("reviews-feed")
++      .on("postgres_changes", { event: "*", schema: "public", table: "cleaner_ratings" }, () => {
++        qc.invalidateQueries({ queryKey: ["reviews"] });
++      })
++      .on(
++        "postgres_changes",
++        { event: "*", schema: "public", table: "room_condition_submissions" },
++        () => {
++          qc.invalidateQueries({ queryKey: ["reviews"] });
++        },
++      )
++      .subscribe();
++    return () => {
++      supabase.removeChannel(channel);
++    };
++  }, [qc]);
 +
-+ALTER TABLE public.cleaning_job_items
-+  ADD COLUMN IF NOT EXISTS requires_photo boolean NOT NULL DEFAULT false;
+   if (!profileLoading && profile?.primary_role !== "owner" && profile?.primary_role !== "hr_company") {
+     return <Navigate to="/dashboard" replace />;
+   }
+ 
+   const reviews = reviewsQ.data?.reviews ?? [];
++  const stays = reviewsQ.data?.stays ?? [];
+   const propertyName = (id: string) =>
+     reviewsQ.data?.properties.find((property) => property.id === id)?.name ?? id.slice(0, 8);
+   const cleanerName = (id: string) => {
+@@ -86,8 +138,12 @@
+     return cleaner?.display_name || cleaner?.username || id.slice(0, 8);
+   };
+   const cleanerIds = Array.from(new Set(reviews.map((review) => review.cleaner_user_id)));
+-  const average = reviews.length
+-    ? (reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length).toFixed(1)
++  const allRatings = [
++    ...reviews.map((review) => review.rating),
++    ...stays.map((stay) => stay.overall_rating ?? 0).filter(Boolean),
++  ];
++  const average = allRatings.length
++    ? (allRatings.reduce((sum, value) => sum + value, 0) / allRatings.length).toFixed(1)
+     : "—";
+ 
+   return (
+@@ -102,15 +158,16 @@
+         <div className="space-y-6">
+           <div className="grid gap-4 sm:grid-cols-3">
+             <StatCard label={t("reviews.average")} value={average} icon={Star} delay={0} />
+-            <StatCard label={t("reviews.count")} value={reviews.length} icon={Building2} delay={80} />
++            <StatCard label={t("reviews.count")} value={allRatings.length} icon={Building2} delay={80} />
+             <StatCard label={t("reviews.pickCleaner")} value={cleanerIds.length} icon={UserRound} delay={160} />
+           </div>
+ 
+-          {cleanerIds.length === 0 ? (
++          {cleanerIds.length === 0 && stays.length === 0 ? (
+             <section className="surface p-8 text-center text-sm text-muted-foreground">
+               {t("reviews.empty")}
+             </section>
+           ) : (
++            <>
+             <div className="grid gap-4 lg:grid-cols-2">
+               {cleanerIds.map((cleanerId, index) => {
+                 const cleanerReviews = reviews.filter((review) => review.cleaner_user_id === cleanerId);
+@@ -164,6 +221,43 @@
+                 );
+               })}
+             </div>
 +
-+ALTER TABLE public.notifications
-+  ADD COLUMN IF NOT EXISTS target_url text;
-+
-+CREATE OR REPLACE FUNCTION public.notification_target_url(p_type text, p_payload jsonb)
-+RETURNS text
++            {stays.length > 0 && (
++              <section className="surface space-y-3 p-5">
++                <header>
++                  <h2 className="text-lg">{t("reviews.stays")}</h2>
++                  <p className="text-sm text-muted-foreground">{t("reviews.staysSubtitle")}</p>
++                </header>
++                <ul className="divide-y divide-border text-sm">
++                  {stays.map((stay) => (
++                    <li key={stay.id} className="space-y-2 py-3">
++                      <div className="flex items-center justify-between gap-3">
++                        <span className="min-w-0 truncate text-muted-foreground">
++                          {t("reviews.forProperty")} {propertyName(stay.property_id)} · {t("reviews.on")}{" "}
++                          {new Date(stay.submitted_at).toLocaleDateString()}
++                        </span>
++                        <span className="flex shrink-0 items-center gap-0.5">
++                          {Array.from({ length: 5 }, (_, star) => (
++                            <Star
++                              key={star}
++                              className={cn(
++                                "h-3.5 w-3.5",
++                                star < (stay.overall_rating ?? 0)
++                                  ? "fill-amber-400 text-amber-400"
++                                  : "text-muted-foreground/30",
++                              )}
++                              aria-hidden="true"
++                            />
++                          ))}
++                        </span>
++                      </div>
++                      {stay.notes && <p className="text-foreground">{stay.notes}</p>}
++                    </li>
++                  ))}
++                </ul>
++              </section>
++            )}
++            </>
+           )}
+         </div>
+       )}
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.tsbuildinfo' '--exclude=.temp' a/src/routes/_authenticated/shop.tsx b/src/routes/_authenticated/shop.tsx
+--- a/src/routes/_authenticated/shop.tsx	2026-07-27 14:58:36.847825712 +0000
++++ b/src/routes/_authenticated/shop.tsx	2026-07-27 15:01:29.631725940 +0000
+@@ -192,6 +192,9 @@
+           "id, status, property_id, total_amount, payment_proof_amount_entered, payment_proof_photo_url, assigned_worker_id, created_at",
+         )
+         .in("property_id", ids)
++        // Fulfilled orders leave the active order board — they stay visible in
++        // the activity log instead.
++        .neq("status", "fulfilled")
+         .order("created_at", { ascending: false });
+       if (error) throw error;
+       return data;
+diff -ruN a/supabase/migrations/20260809000000_activity_log_and_fixes.sql b/supabase/migrations/20260809000000_activity_log_and_fixes.sql
+--- a/supabase/migrations/20260809000000_activity_log_and_fixes.sql	1970-01-01 00:00:00.000000000 +0000
++++ b/supabase/migrations/20260809000000_activity_log_and_fixes.sql	2026-07-27 15:03:56.383618754 +0000
+@@ -0,0 +1,227 @@
++-- 1. Fix kick_hr_company: the previous body called a non-existent two-argument
++--    is_group_owner() overload and wrote the status 'revoked', which is not a
++--    value of the membership_status enum ('active','removed'). Both made the
++--    RPC fail whenever an owner removed a cleaning company.
++CREATE OR REPLACE FUNCTION public.kick_hr_company(p_group_id uuid, p_hr_user_id uuid)
++RETURNS void
 +LANGUAGE plpgsql
-+IMMUTABLE
++SECURITY DEFINER
 +SET search_path = public
 +AS $$
-+DECLARE
-+  v_property text := COALESCE(p_payload->>'propertyId', p_payload->>'property_id');
 +BEGIN
-+  IF p_payload ? 'url' THEN
-+    RETURN p_payload->>'url';
++  IF NOT public.is_group_owner(p_group_id) THEN
++    RAISE EXCEPTION 'Only the owner can remove cleaning companies';
 +  END IF;
 +
-+  IF p_type IN ('special_request') THEN
-+    RETURN '/shop?section=requests' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
-+  ELSIF p_type IN ('payment_proof') THEN
-+    RETURN '/shop?section=shop' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
-+  ELSIF p_type IN ('job_submitted', 'amenity_discrepancy') THEN
-+    RETURN '/cleaning?tab=jobs' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
-+  ELSIF p_type IN ('hr_request', 'hr_job_submitted', 'hr_job_reviewed') THEN
-+    RETURN '/inbox';
-+  ELSIF p_type IN ('job_assigned', 'job_reviewed') THEN
-+    RETURN '/jobs';
-+  ELSIF p_type IN ('task_assigned', 'task_submitted', 'task_approved') THEN
-+    RETURN '/tasks';
-+  END IF;
-+
-+  RETURN NULL;
++  UPDATE public.hr_affiliations
++     SET status = 'removed'
++   WHERE owner_group_id = p_group_id
++     AND hr_company_user_id = p_hr_user_id;
 +END;
 +$$;
++GRANT EXECUTE ON FUNCTION public.kick_hr_company(uuid, uuid) TO authenticated;
 +
-+CREATE OR REPLACE FUNCTION public.notify_user(
-+  p_user_id uuid,
-+  p_type text,
-+  p_payload jsonb
++-- Any rows written with the broken value never existed (the enum rejected them),
++-- so no data backfill is required.
++
++-- ────────────────────────────────────────────────────────────────────────
++-- 2. Activity log — every role sees what they have done.
++-- ────────────────────────────────────────────────────────────────────────
++CREATE TABLE IF NOT EXISTS public.activity_log (
++  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++  actor_user_id uuid,
++  owner_group_id uuid REFERENCES public.owner_groups(id) ON DELETE CASCADE,
++  action text NOT NULL,
++  entity_type text NOT NULL,
++  entity_id uuid,
++  meta jsonb NOT NULL DEFAULT '{}'::jsonb,
++  created_at timestamptz NOT NULL DEFAULT now()
++);
++
++GRANT SELECT, INSERT ON public.activity_log TO authenticated;
++GRANT ALL ON public.activity_log TO service_role;
++ALTER TABLE public.activity_log ENABLE ROW LEVEL SECURITY;
++
++CREATE INDEX IF NOT EXISTS activity_log_actor_idx ON public.activity_log(actor_user_id, created_at DESC);
++CREATE INDEX IF NOT EXISTS activity_log_group_idx ON public.activity_log(owner_group_id, created_at DESC);
++
++DROP POLICY IF EXISTS "actors read own activity" ON public.activity_log;
++CREATE POLICY "actors read own activity" ON public.activity_log FOR SELECT TO authenticated
++  USING (
++    actor_user_id = auth.uid()
++    OR (owner_group_id IS NOT NULL AND public.is_group_owner(owner_group_id))
++    OR (owner_group_id IS NOT NULL AND public.is_hr_affiliated(owner_group_id))
++  );
++
++DROP POLICY IF EXISTS "actors write own activity" ON public.activity_log;
++CREATE POLICY "actors write own activity" ON public.activity_log FOR INSERT TO authenticated
++  WITH CHECK (actor_user_id = auth.uid());
++
++CREATE OR REPLACE FUNCTION public.log_activity(
++  p_actor uuid,
++  p_group uuid,
++  p_action text,
++  p_entity_type text,
++  p_entity_id uuid,
++  p_meta jsonb DEFAULT '{}'::jsonb
 +) RETURNS void
 +LANGUAGE plpgsql
 +SECURITY DEFINER
 +SET search_path = public
 +AS $$
 +BEGIN
-+  INSERT INTO public.notifications(user_id, type, payload, target_url)
-+  VALUES (p_user_id, p_type, p_payload, public.notification_target_url(p_type, p_payload));
++  INSERT INTO public.activity_log(actor_user_id, owner_group_id, action, entity_type, entity_id, meta)
++  VALUES (p_actor, p_group, p_action, p_entity_type, p_entity_id, coalesce(p_meta, '{}'::jsonb));
 +END;
 +$$;
 +
-+CREATE OR REPLACE FUNCTION public.notify_job_assigned()
-+RETURNS trigger
-+LANGUAGE plpgsql
-+SECURITY DEFINER
-+SET search_path = public
-+AS $$
++-- Cleaning jobs -----------------------------------------------------------
++CREATE OR REPLACE FUNCTION public.log_cleaning_job_activity()
++RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 +BEGIN
-+  IF NEW.assigned_to_user_id IS NOT NULL
-+     AND (TG_OP = 'INSERT' OR OLD.assigned_to_user_id IS DISTINCT FROM NEW.assigned_to_user_id) THEN
-+    PERFORM public.notify_user(
-+      NEW.assigned_to_user_id,
-+      'job_assigned',
-+      jsonb_build_object('jobId', NEW.id, 'propertyId', NEW.property_id)
-+    );
++  IF TG_OP = 'INSERT' THEN
++    PERFORM public.log_activity(auth.uid(), NEW.owner_group_id, 'job_created', 'cleaning_job', NEW.id,
++      jsonb_build_object('propertyId', NEW.property_id, 'status', NEW.status));
++  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN
++    PERFORM public.log_activity(auth.uid(), NEW.owner_group_id, 'job_' || NEW.status::text, 'cleaning_job', NEW.id,
++      jsonb_build_object('propertyId', NEW.property_id, 'status', NEW.status));
 +  END IF;
 +  RETURN NEW;
 +END;
 +$$;
++DROP TRIGGER IF EXISTS trg_log_cleaning_job ON public.cleaning_jobs;
++CREATE TRIGGER trg_log_cleaning_job
++  AFTER INSERT OR UPDATE OF status ON public.cleaning_jobs
++  FOR EACH ROW EXECUTE FUNCTION public.log_cleaning_job_activity();
 +
-+CREATE OR REPLACE FUNCTION public.notify_hr_request()
-+RETURNS trigger
-+LANGUAGE plpgsql
-+SECURITY DEFINER
-+SET search_path = public
-+AS $$
++-- Tasks -------------------------------------------------------------------
++CREATE OR REPLACE FUNCTION public.log_task_activity()
++RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 +BEGIN
-+  IF NEW.assigned_via = 'hr_request'
-+     AND NEW.assigned_hr_company_id IS NOT NULL
-+     AND (
-+       TG_OP = 'INSERT'
-+       OR OLD.assigned_via IS DISTINCT FROM 'hr_request'
-+       OR OLD.assigned_hr_company_id IS DISTINCT FROM NEW.assigned_hr_company_id
-+     ) THEN
-+    PERFORM public.notify_user(
-+      NEW.assigned_hr_company_id,
-+      'hr_request',
-+      jsonb_build_object('jobId', NEW.id, 'propertyId', NEW.property_id)
-+    );
++  IF TG_OP = 'INSERT' THEN
++    PERFORM public.log_activity(auth.uid(), NEW.owner_group_id, 'task_created', 'task', NEW.id,
++      jsonb_build_object('title', NEW.title, 'status', NEW.status));
++  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN
++    PERFORM public.log_activity(auth.uid(), NEW.owner_group_id, 'task_' || NEW.status::text, 'task', NEW.id,
++      jsonb_build_object('title', NEW.title, 'status', NEW.status));
 +  END IF;
 +  RETURN NEW;
 +END;
 +$$;
++DROP TRIGGER IF EXISTS trg_log_task ON public.tasks;
++CREATE TRIGGER trg_log_task
++  AFTER INSERT OR UPDATE OF status ON public.tasks
++  FOR EACH ROW EXECUTE FUNCTION public.log_task_activity();
 +
-+CREATE OR REPLACE FUNCTION public.notify_special_request()
-+RETURNS trigger
-+LANGUAGE plpgsql
-+SECURITY DEFINER
-+SET search_path = public
-+AS $$
++-- Shopping orders ---------------------------------------------------------
++CREATE OR REPLACE FUNCTION public.log_order_activity()
++RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 +DECLARE
-+  v_owner_id uuid;
-+  v_group_id uuid;
++  v_group uuid;
 +BEGIN
-+  SELECT p.owner_group_id INTO v_group_id
-+  FROM public.properties p
-+  WHERE p.id = NEW.property_id;
-+
-+  SELECT og.owner_user_id INTO v_owner_id
-+  FROM public.owner_groups og
-+  WHERE og.id = v_group_id;
-+
-+  IF v_owner_id IS NOT NULL THEN
-+    PERFORM public.notify_user(
-+      v_owner_id,
-+      'special_request',
-+      jsonb_build_object('requestId', NEW.id, 'propertyId', NEW.property_id)
-+    );
++  v_group := public.property_group(NEW.property_id);
++  IF TG_OP = 'INSERT' THEN
++    PERFORM public.log_activity(auth.uid(), v_group, 'order_created', 'shopping_order', NEW.id,
++      jsonb_build_object('propertyId', NEW.property_id, 'status', NEW.status));
++  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN
++    PERFORM public.log_activity(auth.uid(), v_group, 'order_' || NEW.status::text, 'shopping_order', NEW.id,
++      jsonb_build_object('propertyId', NEW.property_id, 'status', NEW.status));
 +  END IF;
-+
-+  PERFORM public.notify_user(
-+    m.user_id,
-+    'special_request',
-+    jsonb_build_object('requestId', NEW.id, 'propertyId', NEW.property_id)
-+  )
-+  FROM public.memberships m
-+  WHERE m.owner_group_id = v_group_id
-+    AND m.role = 'worker'
-+    AND m.status = 'active';
-+
 +  RETURN NEW;
 +END;
 +$$;
++DROP TRIGGER IF EXISTS trg_log_order ON public.shopping_orders;
++CREATE TRIGGER trg_log_order
++  AFTER INSERT OR UPDATE OF status ON public.shopping_orders
++  FOR EACH ROW EXECUTE FUNCTION public.log_order_activity();
 +
-+DROP POLICY IF EXISTS "hr reads affiliated ratings" ON public.cleaner_ratings;
-+CREATE POLICY "hr reads affiliated ratings" ON public.cleaner_ratings FOR SELECT TO authenticated
-+  USING (public.is_hr_affiliated(public.property_group(property_id)));
++-- Guest reviews -----------------------------------------------------------
++CREATE OR REPLACE FUNCTION public.log_rating_activity()
++RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
++DECLARE
++  v_group uuid;
++  v_owner uuid;
++BEGIN
++  v_group := public.property_group(NEW.property_id);
++  PERFORM public.log_activity(NEW.cleaner_user_id, v_group, 'review_received', 'cleaner_rating', NEW.id,
++    jsonb_build_object('propertyId', NEW.property_id, 'rating', NEW.rating));
 +
-+DROP POLICY IF EXISTS "hr roster profiles are visible" ON public.profiles;
-+CREATE POLICY "hr roster profiles are visible" ON public.profiles FOR SELECT TO authenticated
-+  USING (
-+    EXISTS (
-+      SELECT 1
-+      FROM public.hr_company_roster r
-+      WHERE r.hr_company_user_id = auth.uid()
-+        AND r.cleaner_user_id = profiles.user_id
-+        AND r.status = 'active'
-+    )
-+    OR EXISTS (
-+      SELECT 1
-+      FROM public.hr_company_roster r
-+      WHERE r.cleaner_user_id = auth.uid()
-+        AND r.hr_company_user_id = profiles.user_id
-+        AND r.status = 'active'
-+    )
-+    OR EXISTS (
-+      SELECT 1
-+      FROM public.hr_affiliations h
-+      JOIN public.owner_groups g ON g.id = h.owner_group_id
-+      WHERE h.hr_company_user_id = auth.uid()
-+        AND g.owner_user_id = profiles.user_id
-+        AND h.status = 'active'
-+    )
-+    OR EXISTS (
-+      SELECT 1
-+      FROM public.hr_affiliations h
-+      JOIN public.owner_groups g ON g.id = h.owner_group_id
-+      WHERE g.owner_user_id = auth.uid()
-+        AND h.hr_company_user_id = profiles.user_id
-+        AND h.status = 'active'
-+    )
-+  );
++  SELECT owner_user_id INTO v_owner FROM public.owner_groups WHERE id = v_group;
++  IF v_owner IS NOT NULL THEN
++    PERFORM public.notify_user(
++      v_owner,
++      'review_received',
++      jsonb_build_object('propertyId', NEW.property_id, 'rating', NEW.rating)
++    );
++  END IF;
++  RETURN NEW;
++END;
++$$;
++DROP TRIGGER IF EXISTS trg_log_rating ON public.cleaner_ratings;
++CREATE TRIGGER trg_log_rating
++  AFTER INSERT ON public.cleaner_ratings
++  FOR EACH ROW EXECUTE FUNCTION public.log_rating_activity();
 +
-+REVOKE ALL ON FUNCTION public.notify_user(uuid, text, jsonb) FROM PUBLIC;
-+GRANT EXECUTE ON FUNCTION public.notify_user(uuid, text, jsonb) TO authenticated;
++-- Special requests --------------------------------------------------------
++CREATE OR REPLACE FUNCTION public.log_special_request_activity()
++RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
++BEGIN
++  PERFORM public.log_activity(auth.uid(), public.property_group(NEW.property_id),
++    'special_request_created', 'special_request', NEW.id,
++    jsonb_build_object('propertyId', NEW.property_id));
++  RETURN NEW;
++END;
++$$;
++DROP TRIGGER IF EXISTS trg_log_special_request ON public.special_requests;
++CREATE TRIGGER trg_log_special_request
++  AFTER INSERT ON public.special_requests
++  FOR EACH ROW EXECUTE FUNCTION public.log_special_request_activity();
++
++-- Memberships -------------------------------------------------------------
++CREATE OR REPLACE FUNCTION public.log_membership_activity()
++RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
++BEGIN
++  IF TG_OP = 'INSERT' THEN
++    PERFORM public.log_activity(auth.uid(), NEW.owner_group_id, 'member_joined', 'membership', NEW.id,
++      jsonb_build_object('role', NEW.role, 'userId', NEW.user_id));
++  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN
++    PERFORM public.log_activity(auth.uid(), NEW.owner_group_id, 'member_' || NEW.status::text, 'membership', NEW.id,
++      jsonb_build_object('role', NEW.role, 'userId', NEW.user_id));
++  END IF;
++  RETURN NEW;
++END;
++$$;
++DROP TRIGGER IF EXISTS trg_log_membership ON public.memberships;
++CREATE TRIGGER trg_log_membership
++  AFTER INSERT OR UPDATE OF status ON public.memberships
++  FOR EACH ROW EXECUTE FUNCTION public.log_membership_activity();
++
++-- Cleaning company affiliations ------------------------------------------
++CREATE OR REPLACE FUNCTION public.log_hr_affiliation_activity()
++RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
++BEGIN
++  IF TG_OP = 'INSERT' THEN
++    PERFORM public.log_activity(auth.uid(), NEW.owner_group_id, 'company_joined', 'hr_affiliation', NEW.id,
++      jsonb_build_object('userId', NEW.hr_company_user_id));
++  ELSIF NEW.status IS DISTINCT FROM OLD.status THEN
++    PERFORM public.log_activity(auth.uid(), NEW.owner_group_id, 'company_' || NEW.status::text, 'hr_affiliation', NEW.id,
++      jsonb_build_object('userId', NEW.hr_company_user_id));
++  END IF;
++  RETURN NEW;
++END;
++$$;
++DROP TRIGGER IF EXISTS trg_log_hr_affiliation ON public.hr_affiliations;
++CREATE TRIGGER trg_log_hr_affiliation
++  AFTER INSERT OR UPDATE OF status ON public.hr_affiliations
++  FOR EACH ROW EXECUTE FUNCTION public.log_hr_affiliation_activity();
++
++-- Realtime: reviews and activity must stream to open dashboards.
++DO $$
++BEGIN
++  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.activity_log; EXCEPTION WHEN duplicate_object THEN NULL; END;
++  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.cleaner_ratings; EXCEPTION WHEN duplicate_object THEN NULL; END;
++  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.room_condition_submissions; EXCEPTION WHEN duplicate_object THEN NULL; END;
++END $$;
++
++-- Reload PostgREST so the new table/RPC are visible immediately.
++NOTIFY pgrst, 'reload schema';
 \ No newline at end of file

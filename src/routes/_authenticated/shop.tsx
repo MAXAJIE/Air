@@ -192,6 +192,9 @@ function OrdersPanel() {
           "id, status, property_id, total_amount, payment_proof_amount_entered, payment_proof_photo_url, assigned_worker_id, created_at",
         )
         .in("property_id", ids)
+        // Fulfilled orders leave the active order board — they stay visible in
+        // the activity log instead.
+        .neq("status", "fulfilled")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data;

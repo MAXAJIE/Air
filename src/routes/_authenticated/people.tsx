@@ -204,7 +204,8 @@ function OwnerPeople() {
         if (!looksMissing) throw error;
         const { error: uErr } = await supabase
           .from("hr_affiliations")
-          .update({ status: "revoked" })
+          // membership_status only has 'active' | 'removed'.
+          .update({ status: "removed" })
           .eq("owner_group_id", groupId!)
           .eq("hr_company_user_id", hrUserId);
         if (uErr) throw uErr;

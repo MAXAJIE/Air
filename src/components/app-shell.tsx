@@ -7,6 +7,7 @@ import {
   ClipboardList,
   Gauge,
   Handshake,
+  History,
   Inbox,
   ListChecks,
   LogOut,
@@ -67,6 +68,7 @@ const NAV: Record<AppRole, NavItem[]> = {
     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
     { to: "/performance", labelKey: "nav.performance", icon: TrendingUp },
     { to: "/reviews", labelKey: "nav.reviews", icon: Star },
+    { to: "/activity", labelKey: "nav.activity", icon: History },
     { to: "/profile", labelKey: "nav.profile", icon: User },
   ],
   cleaner: [
@@ -76,6 +78,7 @@ const NAV: Record<AppRole, NavItem[]> = {
     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
     { to: "/history", labelKey: "nav.history", icon: ListChecks },
     { to: "/performance", labelKey: "nav.performance", icon: TrendingUp },
+    { to: "/activity", labelKey: "nav.activity", icon: History },
     { to: "/profile", labelKey: "nav.profile", icon: User },
   ],
   worker: [
@@ -84,6 +87,7 @@ const NAV: Record<AppRole, NavItem[]> = {
     { to: "/people", labelKey: "nav.myHires", icon: Users },
     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
     { to: "/history", labelKey: "nav.history", icon: ListChecks },
+    { to: "/activity", labelKey: "nav.activity", icon: History },
     { to: "/profile", labelKey: "nav.profile", icon: User },
   ],
   hr_company: [
@@ -93,6 +97,7 @@ const NAV: Record<AppRole, NavItem[]> = {
     { to: "/agencies", labelKey: "nav.agencies", icon: Handshake },
     { to: "/tasks", labelKey: "nav.tasks", icon: ListChecks },
     { to: "/reviews", labelKey: "nav.reviews", icon: Star },
+    { to: "/activity", labelKey: "nav.activity", icon: History },
     { to: "/profile", labelKey: "nav.profile", icon: User },
   ],
 };
