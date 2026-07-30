@@ -1,1512 +1,982 @@
-diff --git a/src/components/group-gate.tsx b/src/components/group-gate.tsx
-index 35051e5..3192f0b 100644
---- a/src/components/group-gate.tsx
-+++ b/src/components/group-gate.tsx
-@@ -25,7 +25,7 @@ export function GroupGate({ role }: { role: AppRole }) {
-       if (error) throw error;
-     },
-     onSuccess: async () => {
--      await qc.invalidateQueries({ queryKey: ["my-groups"] });
-+      await qc.refetchQueries({ queryKey: ["my-groups"] });
-       toast.success(t("common.saved"));
-     },
-     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
-@@ -37,7 +37,10 @@ export function GroupGate({ role }: { role: AppRole }) {
-       if (error) throw error;
-     },
-     onSuccess: async () => {
--      await qc.invalidateQueries({ queryKey: ["my-groups"] });
-+      // Await the refetch (not just an invalidate) so this gate unmounts as
-+      // soon as the new membership/affiliation is visible.
-+      await qc.refetchQueries({ queryKey: ["my-groups"] });
-+      await qc.invalidateQueries({ queryKey: ["hr-affil-list"] });
-       toast.success(t("join.joined"));
-     },
-     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
-diff --git a/src/hooks/use-app.tsx b/src/hooks/use-app.tsx
-index 92e4de8..0bc3a77 100644
---- a/src/hooks/use-app.tsx
-+++ b/src/hooks/use-app.tsx
-@@ -80,11 +80,16 @@ export function useMyGroups() {
-       for (const g of owned.data ?? []) push(g.id, g.name, "owner");
-       for (const m of memberships.data ?? []) {
-         const g = m.owner_groups as unknown as { id: string; name: string } | null;
-+        // The embedded group can be null when RLS hides owner_groups from this
-+        // user. The membership row itself is proof of access, so never drop it:
-+        // dropping it left the user stuck on the invite-code gate forever.
-         if (g) push(g.id, g.name, "member");
-+        else if (m.owner_group_id) push(m.owner_group_id, m.owner_group_id.slice(0, 8), "member");
-       }
-       for (const a of hr.data ?? []) {
-         const g = a.owner_groups as unknown as { id: string; name: string } | null;
-         if (g) push(g.id, g.name, "hr");
-+        else if (a.owner_group_id) push(a.owner_group_id, a.owner_group_id.slice(0, 8), "hr");
-       }
-       return groups;
-     },
-@@ -109,7 +114,9 @@ export function ActiveGroupProvider({ children }: { children: ReactNode }) {
-     if (!groups || groups.length === 0) return;
-     const stored = window.localStorage.getItem(STORAGE_KEY);
-     const valid = stored && groups.some((g) => g.id === stored) ? stored : groups[0].id;
--    setGroupIdState((current) => (current && groups.some((g) => g.id === current) ? current : valid));
-+    setGroupIdState((current) =>
-+      current && groups.some((g) => g.id === current) ? current : valid,
-+    );
-   }, [groups]);
- 
-   const value = useMemo<ActiveGroupValue>(
-diff --git a/src/hooks/use-notifications.ts b/src/hooks/use-notifications.ts
-index c351e80..bd1b6e9 100644
---- a/src/hooks/use-notifications.ts
-+++ b/src/hooks/use-notifications.ts
-@@ -16,10 +16,16 @@ type NotificationType =
-   | "task_assigned"
-   | "task_submitted"
-   | "task_approved"
--  | "review_received";
-+  | "review_received"
-+  | "hygiene_complaint"
-+  | "low_rating";
- 
- export type NotificationPayload = {
-   propertyId?: string;
-+  submissionId?: string;
-+  ratingId?: string;
-+  rating?: number;
-+  cleanerUserId?: string;
-   jobId?: string;
-   taskId?: string;
-   orderId?: string;
-@@ -50,7 +56,8 @@ export const NOTIF_TO_ROUTE: Record<NotificationType, string> = {
-   job_submitted: "/cleaning",
-   job_assigned: "/jobs",
-   job_reviewed: "/jobs",
--  amenity_discrepancy: "/cleaning",
-+  // Guest-reported problems live in the complaints section of the reviews page.
-+  amenity_discrepancy: "/reviews",
-   special_request: "/shop",
-   payment_proof: "/shop",
-   hr_request: "/inbox",
-@@ -60,6 +67,8 @@ export const NOTIF_TO_ROUTE: Record<NotificationType, string> = {
-   task_submitted: "/tasks",
-   task_approved: "/tasks",
-   review_received: "/reviews",
-+  hygiene_complaint: "/reviews",
-+  low_rating: "/reviews",
- };
- 
- /**
-@@ -77,8 +86,14 @@ export function notifUrl(notif: AppNotification): string {
-     params.set("section", "requests");
-   } else if (notif.type === "payment_proof") {
-     params.set("section", "shop");
--  } else if (notif.type === "job_submitted" || notif.type === "amenity_discrepancy") {
-+  } else if (notif.type === "job_submitted") {
-     params.set("tab", "jobs");
-+  } else if (
-+    notif.type === "amenity_discrepancy" ||
-+    notif.type === "hygiene_complaint" ||
-+    notif.type === "low_rating"
-+  ) {
-+    params.set("section", "complaints");
-   }
- 
-   if (notif.payload.propertyId) {
-@@ -137,10 +152,7 @@ export function useMarkRead() {
-   const qc = useQueryClient();
-   return useMutation({
-     mutationFn: async (id: string) => {
--      const { error } = await supabase
--        .from("notifications")
--        .update({ read: true })
--        .eq("id", id);
-+      const { error } = await supabase.from("notifications").update({ read: true }).eq("id", id);
-       if (error) throw error;
-     },
-     onSuccess: () => qc.invalidateQueries({ queryKey: ["unread-notifications"] }),
-@@ -193,5 +205,3 @@ export function useMarkRouteRead() {
-     onSuccess: () => qc.invalidateQueries({ queryKey: ["unread-notifications"] }),
-   });
- }
--
--
 diff --git a/src/i18n/translations.ts b/src/i18n/translations.ts
-index f134345..8eb9860 100644
+index 8eb9860..703b952 100644
 --- a/src/i18n/translations.ts
 +++ b/src/i18n/translations.ts
-@@ -44,6 +44,15 @@ const en = {
-   "reviews.stays": "Stay reviews",
-   "reviews.staysSubtitle": "Ratings guests left about the property itself",
-   "reviews.refresh": "Refresh",
-+  "reviews.complaints": "Complaints",
-+  "reviews.complaintsSubtitle": "Hygiene issues, missing amenities and guest notes",
-+  "reviews.complaintsEmpty": "No complaints reported.",
-+  "reviews.missingAmenities": "Missing amenities",
-+  "reviews.hygienePhotos": "Hygiene photos",
-+  "reviews.guestNotes": "Guest notes",
-+  "reviews.cleanedBy": "Cleaned by",
-+  "reviews.unknownCleaner": "Unassigned",
-+  "reviews.room": "Room",
+@@ -53,6 +53,25 @@ const en = {
+   "reviews.cleanedBy": "Cleaned by",
+   "reviews.unknownCleaner": "Unassigned",
+   "reviews.room": "Room",
++  "reviews.tabReviews": "Reviews",
++  "reviews.tabComplaints": "Complaints",
++  "reviews.openComplaints": "Open",
++  "reviews.resolvedComplaints": "Resolved",
++  "reviews.resolve": "Mark resolved",
++  "reviews.reopen": "Reopen",
++  "reviews.resolved": "Resolved",
++  "reviews.resolvedBy": "Resolved by",
++  "reviews.resolveNote": "Resolution note (optional)",
++  "reviews.resolveSaved": "Complaint marked resolved.",
++  "reviews.reopenSaved": "Complaint reopened.",
++  "reviews.resolvedEmpty": "No resolved complaints yet.",
++
++  "landing.navGuest": "Guests",
++  "landing.guestTitle": "Staying at a Keyward property?",
++  "landing.guestBody":
++    "No app, no account. Enter the stay code from your welcome card to check amenities, report a problem or order extras.",
++  "landing.guestCode": "Stay code",
++  "landing.guestCta": "Open guest page",
  
    "activity.title": "Activity",
    "activity.subtitle": "Everything you and your team have done, newest first",
-@@ -122,11 +131,12 @@ const en = {
-   "auth.updatePassword": "Update password",
-   "auth.passwordUpdated": "Password updated. You can sign in now.",
-   "auth.checkEmail": "Confirm your email address to finish signing up.",
--  "auth.inviteHint": "Have an invite code? Sign up first, then paste it in your account once you're signed in.",
--  "auth.verifyExpired": "Verification link expired after 5 minutes. Sign up again to get a new one.",
-+  "auth.inviteHint":
-+    "Have an invite code? Sign up first, then paste it in your account once you're signed in.",
-+  "auth.verifyExpired":
-+    "Verification link expired after 5 minutes. Sign up again to get a new one.",
-   "auth.idleLogout": "Signed out after 15 minutes of inactivity.",
- 
--
-   "auth.usernameTaken": "That username is taken",
-   "auth.usernameFree": "Username is available",
-   "auth.passwordMismatch": "Passwords do not match",
-@@ -182,13 +192,16 @@ const en = {
-   "dash.jobAssigned": "Cleaning job — cleaner assigned",
-   "dash.jobNeedsCleaner": "Cleaning job — needs a cleaner",
-   "prop.ownerOnly": "Owners only",
--  "prop.ownerOnlyHelp": "Property records are private to the owner. Your jobs and tasks show everything you need.",
--  "prop.amenitiesMoved": "Amenity checklists now live with your cleaning checklists, so one template covers both tasks and item counts.",
-+  "prop.ownerOnlyHelp":
-+    "Property records are private to the owner. Your jobs and tasks show everything you need.",
-+  "prop.amenitiesMoved":
-+    "Amenity checklists now live with your cleaning checklists, so one template covers both tasks and item counts.",
-   "prop.amenitiesMovedCta": "Open checklist templates",
-   "tpl.kindCleaning": "Cleaning checklist",
-   "tpl.kindAmenity": "Amenity checklist",
-   "tpl.amenityTitle": "Amenity checklist",
--  "tpl.amenityHelp": "Set the expected quantity of each item for a property. Cleaners count these items and photograph them during a clean.",
-+  "tpl.amenityHelp":
-+    "Set the expected quantity of each item for a property. Cleaners count these items and photograph them during a clean.",
-   "dash.welcome": "Welcome back",
-   "dash.properties": "Properties",
-   "dash.team": "Team members",
-@@ -269,7 +282,8 @@ const en = {
-   "clean.jobSubmitted": "Job submitted for review.",
-   "clean.noJobs": "No cleaning jobs assigned to you.",
- 
--  "shop.qrEncrypted": "The QR image is encrypted and stored in the database. It stays until you replace or delete it.",
-+  "shop.qrEncrypted":
-+    "The QR image is encrypted and stored in the database. It stays until you replace or delete it.",
-   "shop.replaceQr": "Replace QR code",
-   "shop.deleteQr": "Delete QR code",
-   "shop.qrDeleted": "QR code deleted.",
-@@ -290,7 +304,8 @@ const en = {
-   "clean.itemDone": "Done",
- 
-   "amen.title": "Amenity checklist templates",
--  "amen.help": "Build reusable amenity lists with reference photos, then apply them to any property.",
-+  "amen.help":
-+    "Build reusable amenity lists with reference photos, then apply them to any property.",
-   "amen.new": "New amenity template",
-   "amen.edit": "Edit amenity template",
-   "amen.items": "Amenity items",
-@@ -410,7 +425,8 @@ const en = {
-   "guest.requestThanks": "Your request was sent to the host.",
-   "guest.cart": "Your order",
-   "guest.payTitle": "Pay the host",
--  "guest.payHelp": "Scan the host's QR code, pay, then upload a photo of your payment and type in the amount.",
-+  "guest.payHelp":
-+    "Scan the host's QR code, pay, then upload a photo of your payment and type in the amount.",
-   "guest.amountPaid": "Amount you paid",
-   "guest.uploadProof": "Upload payment proof",
-   "guest.orderThanks": "Order sent. The host will confirm your payment.",
-@@ -448,27 +464,35 @@ const en = {
-   "landing.navFaq": "FAQ",
-   "landing.featuresLabel": "Features",
-   "landing.featuresTitle": "Everything you need to run your listings",
--  "landing.featuresBody": "From photo-verified cleans to guest requests and team coordination — all in one ledger.",
-+  "landing.featuresBody":
-+    "From photo-verified cleans to guest requests and team coordination — all in one ledger.",
-   "landing.howLabel": "How it works",
-   "landing.howTitle": "Get started in four steps",
-   "landing.howBody": "From signup to your first verified clean in under 10 minutes.",
-   "landing.how1Title": "Sign up & onboard",
--  "landing.how1Body": "Create your account, choose your role — owner, cleaner, worker, or cleaning company — and set up your group.",
-+  "landing.how1Body":
-+    "Create your account, choose your role — owner, cleaner, worker, or cleaning company — and set up your group.",
-   "landing.how2Title": "Add properties & templates",
--  "landing.how2Body": "Import your listings, set amenity baselines, and build reusable cleaning checklists.",
-+  "landing.how2Body":
-+    "Import your listings, set amenity baselines, and build reusable cleaning checklists.",
-   "landing.how3Title": "Invite your team",
--  "landing.how3Body": "Generate invite codes for cleaners, workers, or partner cleaning companies to join your group.",
-+  "landing.how3Body":
-+    "Generate invite codes for cleaners, workers, or partner cleaning companies to join your group.",
-   "landing.how4Title": "Schedule & track",
--  "landing.how4Body": "Assign cleaning jobs, track progress with photo proof, and handle guest requests in real time.",
-+  "landing.how4Body":
-+    "Assign cleaning jobs, track progress with photo proof, and handle guest requests in real time.",
-   "landing.testimonialsLabel": "Testimonials",
-   "landing.testimonialsTitle": "Loved by hosts and teams",
--  "landing.testimonial1": "Keyward transformed how we manage our 12 listings. The photo-verified cleaning alone saved us countless disputes with guests.",
-+  "landing.testimonial1":
-+    "Keyward transformed how we manage our 12 listings. The photo-verified cleaning alone saved us countless disputes with guests.",
-   "landing.testimonial1Auth": "Sarah Chen",
-   "landing.testimonial1Role": "Airbnb Superhost, 12 properties",
--  "landing.testimonial2": "As a cleaning company owner, I love how I can assign jobs to my roster and see photo proof of every clean. It's a game-changer.",
-+  "landing.testimonial2":
-+    "As a cleaning company owner, I love how I can assign jobs to my roster and see photo proof of every clean. It's a game-changer.",
-   "landing.testimonial2Auth": "Marcus Rivera",
-   "landing.testimonial2Role": "CleanCo Pro, 25 cleaners",
--  "landing.testimonial3": "The amenity honesty check feature caught discrepancies we never would have noticed. Our guests are happier and our inventory is accurate.",
-+  "landing.testimonial3":
-+    "The amenity honesty check feature caught discrepancies we never would have noticed. Our guests are happier and our inventory is accurate.",
-   "landing.testimonial3Auth": "Emma Thompson",
-   "landing.testimonial3Role": "Property manager, 8 listings",
-   "landing.pricingLabel": "Pricing",
-@@ -503,19 +527,26 @@ const en = {
-   "landing.faqLabel": "FAQ",
-   "landing.faqTitle": "Frequently asked questions",
-   "landing.faq1Q": "Is there a free trial?",
--  "landing.faq1A": "Yes! During our pilot phase, Keyward is completely free. You get access to all features with hard-coded team and property limits. No credit card required.",
-+  "landing.faq1A":
-+    "Yes! During our pilot phase, Keyward is completely free. You get access to all features with hard-coded team and property limits. No credit card required.",
-   "landing.faq2Q": "Can I switch roles later?",
--  "landing.faq2A": "Your primary role is set at signup and cannot be changed. Choose carefully — if you're an owner, you manage properties and a team. If you're a cleaner or worker, you take on assigned jobs.",
-+  "landing.faq2A":
-+    "Your primary role is set at signup and cannot be changed. Choose carefully — if you're an owner, you manage properties and a team. If you're a cleaner or worker, you take on assigned jobs.",
-   "landing.faq3Q": "How does photo-verified cleaning work?",
--  "landing.faq3A": "Cleaners receive a digital checklist with every item that needs attention. They tick items off and take photos as proof. Owners can review the photos before approving the job, ensuring nothing is missed.",
-+  "landing.faq3A":
-+    "Cleaners receive a digital checklist with every item that needs attention. They tick items off and take photos as proof. Owners can review the photos before approving the job, ensuring nothing is missed.",
-   "landing.faq4Q": "Can I work with multiple owners or groups?",
--  "landing.faq4A": "Absolutely. Cleaners and workers can redeem invite codes from multiple owners and work for several groups at the same time. All your jobs appear in one unified inbox.",
-+  "landing.faq4A":
-+    "Absolutely. Cleaners and workers can redeem invite codes from multiple owners and work for several groups at the same time. All your jobs appear in one unified inbox.",
-   "landing.faq5Q": "How do guests interact with the platform?",
--  "landing.faq5A": "Guests don't need to create an account. They open a unique link for their property, type in a stay code, and can report room conditions, submit special requests, or order supplies — all without logging in.",
-+  "landing.faq5A":
-+    "Guests don't need to create an account. They open a unique link for their property, type in a stay code, and can report room conditions, submit special requests, or order supplies — all without logging in.",
-   "landing.faq6Q": "What happens when I exceed pilot limits?",
--  "landing.faq6A": "During the pilot, hard limits are enforced. Once we launch paid plans, you'll be able to upgrade seamlessly without losing any data or interrupting your operations.",
-+  "landing.faq6A":
-+    "During the pilot, hard limits are enforced. Once we launch paid plans, you'll be able to upgrade seamlessly without losing any data or interrupting your operations.",
-   "landing.ctaTitle": "Ready to streamline your operations?",
--  "landing.ctaBody": "Join hundreds of hosts and teams already using Keyward to manage their listings, cleans, and guest requests from one place.",
-+  "landing.ctaBody":
-+    "Join hundreds of hosts and teams already using Keyward to manage their listings, cleans, and guest requests from one place.",
-   "landing.footerBody": "One ledger for every listing, every clean, and every guest request.",
-   "landing.footerProduct": "Product",
-   "landing.footerCompany": "Company",
-@@ -539,7 +570,8 @@ const en = {
-   "people.reveal": "Reveal details",
-   "people.hide": "Hide details",
-   "people.encrypted": "Encrypted — visible to you as group owner",
--  "people.inviteHint": "Share a code with the person you want to add. They redeem it after signing up.",
-+  "people.inviteHint":
-+    "Share a code with the person you want to add. They redeem it after signing up.",
- 
-   "tpl.title": "Checklist templates",
-   "tpl.new": "New template",
-@@ -592,7 +624,8 @@ const en = {
- 
-   "profile.account": "Account",
-   "profile.personal": "Personal details",
--  "profile.encryptedNote": "Encrypted before it is stored. Only you and your group owner can read it.",
-+  "profile.encryptedNote":
-+    "Encrypted before it is stored. Only you and your group owner can read it.",
-   "profile.fullName": "Full legal name",
-   "profile.idNumber": "IC / passport number",
-   "profile.phone": "Phone number",
-@@ -620,14 +653,16 @@ const en = {
-   "nav.myHires": "Who hired me",
-   "shop.sectionToggle": "Switch between shopping and special requests",
- 
--  "req.about": "Special requests are extras a guest asks for during their stay — sent from the guest page of the property they are checked into.",
-+  "req.about":
-+    "Special requests are extras a guest asks for during their stay — sent from the guest page of the property they are checked into.",
-   "req.about1": "Guests raise a request; it lands here as Open.",
-   "req.about2": "Assign it to a worker and the status becomes Assigned.",
-   "req.about3": "Mark it resolved once the guest has what they asked for.",
-   "req.empty": "No special requests yet. They appear here as soon as a guest sends one.",
- 
-   "people.myHires": "Who hired me",
--  "people.myHiresHelp": "Every owner group you currently work for. You can work for more than one at a time.",
-+  "people.myHiresHelp":
-+    "Every owner group you currently work for. You can work for more than one at a time.",
-   "people.noHires": "No owner has hired you yet. Redeem an invite code to join one.",
-   "people.joinAnother": "Join another owner",
-   "people.joinAnotherHelp": "Paste an invite code from another owner to work for them as well.",
-@@ -637,7 +672,8 @@ const en = {
-   "profile.previewHint": "Press the gear icon above to change any of these details.",
-   "profile.nameOncePerWeek": "Your name can be changed once every 7 days.",
-   "profile.nameLocked": "Name change locked until the 7-day window is over",
--  "profile.passwordEmailNote": "A confirmation email is sent to your address whenever the password changes.",
-+  "profile.passwordEmailNote":
-+    "A confirmation email is sent to your address whenever the password changes.",
-   "profile.passwordChangedEmail": "Password updated. We emailed you a confirmation link.",
- 
-   "avatar.label": "Profile picture",
-@@ -646,7 +682,8 @@ const en = {
-   "avatar.help": "Shown as a circle across the app. JPG or PNG, up to 8 MB.",
-   "avatar.tooLarge": "Image must be under 8 MB",
-   "avatar.cropTitle": "Position your picture",
--  "avatar.cropHelp": "Only what stays inside the circle is kept. Drag to place your face and zoom to fit.",
-+  "avatar.cropHelp":
-+    "Only what stays inside the circle is kept. Drag to place your face and zoom to fit.",
-   "avatar.zoom": "Zoom",
-   "avatar.save": "Use this picture",
- };
-@@ -654,6 +691,15 @@ const en = {
- type Dict = typeof en;
- 
- const zhHans: Partial<Dict> = {
-+  "reviews.complaints": "投诉",
-+  "reviews.complaintsSubtitle": "卫生问题、用品缺失与住客留言",
-+  "reviews.complaintsEmpty": "暂无投诉。",
-+  "reviews.missingAmenities": "用品缺失",
-+  "reviews.hygienePhotos": "卫生照片",
-+  "reviews.guestNotes": "住客留言",
-+  "reviews.cleanedBy": "清洁人员",
-+  "reviews.unknownCleaner": "未指派",
-+  "reviews.room": "房间",
+@@ -700,6 +719,23 @@ const zhHans: Partial<Dict> = {
+   "reviews.cleanedBy": "清洁人员",
+   "reviews.unknownCleaner": "未指派",
+   "reviews.room": "房间",
++  "reviews.tabReviews": "评价",
++  "reviews.tabComplaints": "投诉",
++  "reviews.openComplaints": "待处理",
++  "reviews.resolvedComplaints": "已处理",
++  "reviews.resolve": "标记为已处理",
++  "reviews.reopen": "重新打开",
++  "reviews.resolved": "已处理",
++  "reviews.resolvedBy": "处理人",
++  "reviews.resolveNote": "处理说明（选填）",
++  "reviews.resolveSaved": "投诉已标记为处理完成。",
++  "reviews.reopenSaved": "投诉已重新打开。",
++  "reviews.resolvedEmpty": "暂无已处理的投诉。",
++  "landing.navGuest": "住客入口",
++  "landing.guestTitle": "正在入住 Keyward 房源？",
++  "landing.guestBody": "无需下载、无需注册。输入欢迎卡上的入住代码，即可核对用品、反馈问题或加购物品。",
++  "landing.guestCode": "入住代码",
++  "landing.guestCta": "进入住客页面",
    "clean.jobsMirrored": "每个已排期的清洁也会出现在任务中，并标记为清洁任务。",
    "clean.viewAll": "查看全部任务",
    "clean.historyTitle": "清洁任务历史",
-@@ -1029,7 +1075,8 @@ const zhHans: Partial<Dict> = {
-   "landing.f1": "带照片核验的清洁",
-   "landing.f1Body": "清洁员按指派时生成的清单快照逐项打勾，并随手附上照片。",
-   "landing.f2": "物品诚信盘点",
--  "landing.f2Body": "房东、清洁员与客人都可盘点同一份清单，数量不符会自动标记，并记录是谁、在何时上报。",
-+  "landing.f2Body":
-+    "房东、清洁员与客人都可盘点同一份清单，数量不符会自动标记，并记录是谁、在何时上报。",
-   "landing.f3": "自有或外包",
-   "landing.f3Body": "可以指派给自己的清洁员，也可以发给合作的清洁公司，由其从名册中派人。",
-   "landing.f4": "免登录的客人流程",
-@@ -1061,13 +1108,16 @@ const zhHans: Partial<Dict> = {
-   "landing.how4Body": "指派清洁任务，通过照片核验追踪进度，实时处理客人请求。",
-   "landing.testimonialsLabel": "用户评价",
-   "landing.testimonialsTitle": "深受房东与团队喜爱",
--  "landing.testimonial1": "Keyward 彻底改变了我们管理 12 套房源的方式。光是带照片核验的清洁功能就帮我们避免了无数与客人的纠纷。",
-+  "landing.testimonial1":
-+    "Keyward 彻底改变了我们管理 12 套房源的方式。光是带照片核验的清洁功能就帮我们避免了无数与客人的纠纷。",
-   "landing.testimonial1Auth": "Sarah Chen",
-   "landing.testimonial1Role": "Airbnb 超赞房东，12 套房源",
--  "landing.testimonial2": "作为清洁公司老板，我可以指派任务给我的名册清洁员，并看到每次清洁的照片证明。这太棒了。",
-+  "landing.testimonial2":
-+    "作为清洁公司老板，我可以指派任务给我的名册清洁员，并看到每次清洁的照片证明。这太棒了。",
-   "landing.testimonial2Auth": "Marcus Rivera",
-   "landing.testimonial2Role": "CleanCo Pro，25 名清洁员",
--  "landing.testimonial3": "物品诚信盘点功能帮我们发现了从未注意到的差异。客人更满意了，我们的库存也更准确了。",
-+  "landing.testimonial3":
-+    "物品诚信盘点功能帮我们发现了从未注意到的差异。客人更满意了，我们的库存也更准确了。",
-   "landing.testimonial3Auth": "Emma Thompson",
-   "landing.testimonial3Role": "物业经理，8 套房源",
-   "landing.pricingLabel": "定价",
-@@ -1102,17 +1152,23 @@ const zhHans: Partial<Dict> = {
-   "landing.faqLabel": "常见问题",
-   "landing.faqTitle": "常见问题解答",
-   "landing.faq1Q": "有免费试用吗？",
--  "landing.faq1A": "有的！在试点阶段，Keyward 完全免费。你可以使用所有功能，仅设有硬性的团队和房源上限。无需信用卡。",
-+  "landing.faq1A":
-+    "有的！在试点阶段，Keyward 完全免费。你可以使用所有功能，仅设有硬性的团队和房源上限。无需信用卡。",
-   "landing.faq2Q": "以后可以更改身份吗？",
--  "landing.faq2A": "你的主要身份在注册时设定，之后无法更改。请谨慎选择——如果你是房东，你管理房源和团队；如果你是清洁员或跑腿人员，你承接指派的任务。",
-+  "landing.faq2A":
-+    "你的主要身份在注册时设定，之后无法更改。请谨慎选择——如果你是房东，你管理房源和团队；如果你是清洁员或跑腿人员，你承接指派的任务。",
-   "landing.faq3Q": "带照片核验的清洁如何运作？",
--  "landing.faq3A": "清洁员会收到一份数字清单，列出需要关注的每个项目。他们逐项打勾并拍照作为证明。房东可以在批准前查看照片，确保没有遗漏。",
-+  "landing.faq3A":
-+    "清洁员会收到一份数字清单，列出需要关注的每个项目。他们逐项打勾并拍照作为证明。房东可以在批准前查看照片，确保没有遗漏。",
-   "landing.faq4Q": "可以同时为多位房东或多个团队工作吗？",
--  "landing.faq4A": "当然可以。清洁员和跑腿人员可以兑换多位房东的邀请码，同时为多个团队工作。所有任务都会显示在一个统一收件箱中。",
-+  "landing.faq4A":
-+    "当然可以。清洁员和跑腿人员可以兑换多位房东的邀请码，同时为多个团队工作。所有任务都会显示在一个统一收件箱中。",
-   "landing.faq5Q": "客人如何与平台互动？",
--  "landing.faq5A": "客人无需创建账号。他们打开房源专属链接，输入入住代码，就可以反馈房况、提交特殊请求或下单代购——全部无需登录。",
-+  "landing.faq5A":
-+    "客人无需创建账号。他们打开房源专属链接，输入入住代码，就可以反馈房况、提交特殊请求或下单代购——全部无需登录。",
-   "landing.faq6Q": "超过试点限制会怎样？",
--  "landing.faq6A": "试点阶段会强制执行硬性上限。当我们推出付费方案后，你可以无缝升级，不会丢失任何数据或中断运营。",
-+  "landing.faq6A":
-+    "试点阶段会强制执行硬性上限。当我们推出付费方案后，你可以无缝升级，不会丢失任何数据或中断运营。",
-   "landing.ctaTitle": "准备好简化运营了吗？",
-   "landing.ctaBody": "加入数百位已经使用 Keyward 在统一平台管理房源、清洁和客人请求的房东与团队。",
-   "landing.footerBody": "同一本台账管理每一处房源、每一次清洁和每一个客人请求。",
-@@ -1155,6 +1211,15 @@ const zhHans: Partial<Dict> = {
- };
- 
- const zhHant: Partial<Dict> = {
-+  "reviews.complaints": "投訴",
-+  "reviews.complaintsSubtitle": "衛生問題、備品缺失與住客留言",
-+  "reviews.complaintsEmpty": "目前沒有投訴。",
-+  "reviews.missingAmenities": "備品缺失",
-+  "reviews.hygienePhotos": "衛生照片",
-+  "reviews.guestNotes": "住客留言",
-+  "reviews.cleanedBy": "清潔人員",
-+  "reviews.unknownCleaner": "未指派",
-+  "reviews.room": "房間",
+@@ -1220,6 +1256,23 @@ const zhHant: Partial<Dict> = {
+   "reviews.cleanedBy": "清潔人員",
+   "reviews.unknownCleaner": "未指派",
+   "reviews.room": "房間",
++  "reviews.tabReviews": "評價",
++  "reviews.tabComplaints": "投訴",
++  "reviews.openComplaints": "待處理",
++  "reviews.resolvedComplaints": "已處理",
++  "reviews.resolve": "標記為已處理",
++  "reviews.reopen": "重新開啟",
++  "reviews.resolved": "已處理",
++  "reviews.resolvedBy": "處理人",
++  "reviews.resolveNote": "處理說明（選填）",
++  "reviews.resolveSaved": "投訴已標記為處理完成。",
++  "reviews.reopenSaved": "投訴已重新開啟。",
++  "reviews.resolvedEmpty": "目前沒有已處理的投訴。",
++  "landing.navGuest": "住客入口",
++  "landing.guestTitle": "正在入住 Keyward 房源？",
++  "landing.guestBody": "無需下載、無需註冊。輸入歡迎卡上的入住代碼，即可核對備品、回報問題或加購物品。",
++  "landing.guestCode": "入住代碼",
++  "landing.guestCta": "進入住客頁面",
    "nav.activity": "活動記錄",
    "nav.reviews": "評價",
    "activity.title": "活動記錄",
-@@ -1306,7 +1371,8 @@ const zhHant: Partial<Dict> = {
-   "guest.title": "歡迎入住",
-   "guest.buy": "代購商品",
-   "landing.heroTitle": "房源、清潔與客人請求，都在同一本帳簿裡。",
--  "landing.heroBody": "Keyward 讓民宿房東擁有統一的營運視角：附照片核驗的清潔、物品誠信盤點、客人請求，以及自有或外包的清潔團隊。",
-+  "landing.heroBody":
-+    "Keyward 讓民宿房東擁有統一的營運視角：附照片核驗的清潔、物品誠信盤點、客人請求，以及自有或外包的清潔團隊。",
-   "landing.heroBadge": "試營運版 — 加入等候清單",
-   "landing.heroFootnote": "無需信用卡。試營運期間免費使用，團隊規模設有硬性上限。",
-   "landing.cta": "立即開始",
-@@ -1335,13 +1401,16 @@ const zhHant: Partial<Dict> = {
-   "landing.how4Body": "指派清潔任務，透過照片核驗追蹤進度，即時處理客人請求。",
-   "landing.testimonialsLabel": "使用者評價",
-   "landing.testimonialsTitle": "深受房東與團隊喜愛",
--  "landing.testimonial1": "Keyward 徹底改變了我們管理 12 套房源的方式。光是附照片核驗的清潔功能就幫我們避免了無數與客人的糾紛。",
-+  "landing.testimonial1":
-+    "Keyward 徹底改變了我們管理 12 套房源的方式。光是附照片核驗的清潔功能就幫我們避免了無數與客人的糾紛。",
-   "landing.testimonial1Auth": "Sarah Chen",
-   "landing.testimonial1Role": "Airbnb 超讚房東，12 套房源",
--  "landing.testimonial2": "作為清潔公司老闆，我可以指派任務給名冊中的清潔員，並看到每次清潔的照片證明。這太棒了。",
-+  "landing.testimonial2":
-+    "作為清潔公司老闆，我可以指派任務給名冊中的清潔員，並看到每次清潔的照片證明。這太棒了。",
-   "landing.testimonial2Auth": "Marcus Rivera",
-   "landing.testimonial2Role": "CleanCo Pro，25 名清潔員",
--  "landing.testimonial3": "物品誠信盤點功能幫我們發現了從未注意到的差異。客人更滿意了，庫存也更準確了。",
-+  "landing.testimonial3":
-+    "物品誠信盤點功能幫我們發現了從未注意到的差異。客人更滿意了，庫存也更準確了。",
-   "landing.testimonial3Auth": "Emma Thompson",
-   "landing.testimonial3Role": "物業經理，8 套房源",
-   "landing.pricingLabel": "定價",
-@@ -1376,17 +1445,23 @@ const zhHant: Partial<Dict> = {
-   "landing.faqLabel": "常見問題",
-   "landing.faqTitle": "常見問題解答",
-   "landing.faq1Q": "有免費試用嗎？",
--  "landing.faq1A": "有的！在試營運階段，Keyward 完全免費。你可以使用所有功能，僅設有硬性的團隊和房源上限。無需信用卡。",
-+  "landing.faq1A":
-+    "有的！在試營運階段，Keyward 完全免費。你可以使用所有功能，僅設有硬性的團隊和房源上限。無需信用卡。",
-   "landing.faq2Q": "以後可以更改身分嗎？",
--  "landing.faq2A": "你的主要身分在註冊時設定，之後無法更改。請謹慎選擇——如果你是房東，你管理房源和團隊；如果你是清潔員或跑腿人員，你承接指派的任務。",
-+  "landing.faq2A":
-+    "你的主要身分在註冊時設定，之後無法更改。請謹慎選擇——如果你是房東，你管理房源和團隊；如果你是清潔員或跑腿人員，你承接指派的任務。",
-   "landing.faq3Q": "附照片核驗的清潔如何運作？",
--  "landing.faq3A": "清潔員會收到一份數位清單，列出需要關注的每個項目。他們逐項打勾並拍照作為證明。房東可以在批准前查看照片，確保沒有遺漏。",
-+  "landing.faq3A":
-+    "清潔員會收到一份數位清單，列出需要關注的每個項目。他們逐項打勾並拍照作為證明。房東可以在批准前查看照片，確保沒有遺漏。",
-   "landing.faq4Q": "可以同時為多位房東或多個團隊工作嗎？",
--  "landing.faq4A": "當然可以。清潔員和跑腿人員可以兌換多位房東的邀請碼，同時為多個團隊工作。所有任務都會顯示在一個統一收件匣中。",
-+  "landing.faq4A":
-+    "當然可以。清潔員和跑腿人員可以兌換多位房東的邀請碼，同時為多個團隊工作。所有任務都會顯示在一個統一收件匣中。",
-   "landing.faq5Q": "客人如何與平台互動？",
--  "landing.faq5A": "客人無需建立帳號。他們打開房源專屬連結，輸入入住代碼，就可以反饋房況、提交特殊請求或下單代購——全部無需登入。",
-+  "landing.faq5A":
-+    "客人無需建立帳號。他們打開房源專屬連結，輸入入住代碼，就可以反饋房況、提交特殊請求或下單代購——全部無需登入。",
-   "landing.faq6Q": "超過試營運限制會怎樣？",
--  "landing.faq6A": "試營運階段會強制執行硬性上限。當我們推出付費方案後，你可以無縫升級，不會遺失任何資料或中斷營運。",
-+  "landing.faq6A":
-+    "試營運階段會強制執行硬性上限。當我們推出付費方案後，你可以無縫升級，不會遺失任何資料或中斷營運。",
-   "landing.ctaTitle": "準備好簡化營運了嗎？",
-   "landing.ctaBody": "加入數百位已經使用 Keyward 在統一平台管理房源、清潔和客人請求的房東與團隊。",
-   "landing.footerBody": "同一本帳簿管理每一處房源、每一次清潔和每一個客人請求。",
-@@ -1396,7 +1471,8 @@ const zhHant: Partial<Dict> = {
-   "landing.f1": "附照片核驗的清潔",
-   "landing.f1Body": "清潔員按指派時產生的清單快照逐項打勾，並隨手附上照片。",
-   "landing.f2": "物品誠信盤點",
--  "landing.f2Body": "房東、清潔員與客人都可盤點同一份清單，數量不符會自動標記，並記錄是誰、在何時回報。",
-+  "landing.f2Body":
-+    "房東、清潔員與客人都可盤點同一份清單，數量不符會自動標記，並記錄是誰、在何時回報。",
-   "landing.f3": "自有或外包",
-   "landing.f3Body": "可以指派給自己的清潔員，也可以發給合作的清潔公司，由其從名冊中派人。",
-   "landing.f4": "免登入的客人流程",
-diff --git a/src/routes/_authenticated/agencies.tsx b/src/routes/_authenticated/agencies.tsx
-index 2094eda..6a1bf38 100644
---- a/src/routes/_authenticated/agencies.tsx
-+++ b/src/routes/_authenticated/agencies.tsx
-@@ -48,7 +48,10 @@ function Page() {
-       const { data: groups } = await supabase
-         .from("owner_groups")
-         .select("id, name, owner_user_id")
--        .in("id", data.map((a) => a.owner_group_id));
-+        .in(
-+          "id",
-+          data.map((a) => a.owner_group_id),
-+        );
- 
-       const ownerIds = Array.from(new Set((groups ?? []).map((g) => g.owner_user_id)));
-       const { data: owners } = await supabase
-@@ -76,7 +79,13 @@ function Page() {
-     },
-     onSuccess: async () => {
-       setCode("");
--      await qc.invalidateQueries({ queryKey: ["hr-affil-list"] });
-+      // "my-groups" drives the invite-code gate and the group switcher. Without
-+      // refetching it here, a cleaning company that joins from this page stays
-+      // gated until a full reload.
-+      await Promise.all([
-+        qc.invalidateQueries({ queryKey: ["hr-affil-list"] }),
-+        qc.refetchQueries({ queryKey: ["my-groups"] }),
-+      ]);
-       toast.success(t("join.joined"));
-     },
-     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
-diff --git a/src/routes/_authenticated/people.tsx b/src/routes/_authenticated/people.tsx
-index 5ccd08a..eace8b8 100644
---- a/src/routes/_authenticated/people.tsx
-+++ b/src/routes/_authenticated/people.tsx
-@@ -438,7 +438,7 @@ function MemberPeople() {
-     onSuccess: async () => {
-       setCode("");
-       await Promise.all([
--        qc.invalidateQueries({ queryKey: ["my-groups"] }),
-+        qc.refetchQueries({ queryKey: ["my-groups"] }),
-         qc.invalidateQueries({ queryKey: ["my-hires"] }),
-       ]);
-       toast.success(t("join.joined"));
+diff --git a/src/integrations/supabase/types.ts b/src/integrations/supabase/types.ts
+index 6f411eb..eb063b3 100644
+--- a/src/integrations/supabase/types.ts
++++ b/src/integrations/supabase/types.ts
+@@ -296,6 +296,41 @@ export type Database = {
+           },
+         ]
+       }
++      complaint_resolutions: {
++        Row: {
++          complaint_key: string
++          id: string
++          property_id: string
++          resolution_note: string | null
++          resolved_at: string
++          resolved_by: string
++        }
++        Insert: {
++          complaint_key: string
++          id?: string
++          property_id: string
++          resolution_note?: string | null
++          resolved_at?: string
++          resolved_by: string
++        }
++        Update: {
++          complaint_key?: string
++          id?: string
++          property_id?: string
++          resolution_note?: string | null
++          resolved_at?: string
++          resolved_by?: string
++        }
++        Relationships: [
++          {
++            foreignKeyName: "complaint_resolutions_property_id_fkey"
++            columns: ["property_id"]
++            isOneToOne: false
++            referencedRelation: "properties"
++            referencedColumns: ["id"]
++          },
++        ]
++      }
+       cleaning_job_items: {
+         Row: {
+           cleaning_job_id: string
 diff --git a/src/routes/_authenticated/reviews.tsx b/src/routes/_authenticated/reviews.tsx
-index d56635e..6959716 100644
+index 6959716..f511c97 100644
 --- a/src/routes/_authenticated/reviews.tsx
 +++ b/src/routes/_authenticated/reviews.tsx
-@@ -1,9 +1,10 @@
- import { useQuery, useQueryClient } from "@tanstack/react-query";
--import { Navigate, createFileRoute } from "@tanstack/react-router";
--import { Building2, Star, UserRound } from "lucide-react";
--import { useEffect } from "react";
-+import { Navigate, createFileRoute, useLocation } from "@tanstack/react-router";
-+import { AlertTriangle, Building2, PackageMinus, Star, UserRound } from "lucide-react";
-+import { useEffect, useMemo, useRef } from "react";
+@@ -1,10 +1,28 @@
+-import { useQuery, useQueryClient } from "@tanstack/react-query";
++import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { Navigate, createFileRoute, useLocation } from "@tanstack/react-router";
+-import { AlertTriangle, Building2, PackageMinus, Star, UserRound } from "lucide-react";
+-import { useEffect, useMemo, useRef } from "react";
++import {
++  AlertTriangle,
++  Building2,
++  CheckCircle2,
++  PackageMinus,
++  RotateCcw,
++  Star,
++  UserRound,
++} from "lucide-react";
++import { useEffect, useMemo, useRef, useState } from "react";
++import { toast } from "sonner";
  
  import { ListSkeleton, PageHeader, StatCard, StatsSkeleton } from "@/components/app-shell";
-+import { SignedPhoto } from "@/components/signed-photo";
+ import { SignedPhoto } from "@/components/signed-photo";
++import {
++  COVER_HEIGHT,
++  GRID_COLS,
++  ViewToggle,
++  useViewPrefs,
++  type CardSize,
++  type ViewMode,
++} from "@/components/view-toggle";
++import { Button } from "@/components/ui/button";
  import { useActiveGroup, useProfile } from "@/hooks/use-app";
  import { useT } from "@/i18n";
  import { supabase } from "@/integrations/supabase/client";
-@@ -35,16 +36,67 @@ type ReviewRow = {
- type StayReview = {
-   id: string;
-   property_id: string;
-+  customer_session_id: string | null;
-   overall_rating: number | null;
-   notes: string | null;
-   submitted_at: string;
+@@ -61,6 +79,15 @@ type JobRow = {
+   completed_at: string | null;
  };
  
-+type PhotoRow = { id: string; submission_id: string; photo_url: string };
-+
-+type ShortageRow = {
++type ResolutionRow = {
 +  id: string;
 +  property_id: string;
-+  customer_session_id: string | null;
-+  amenity_definition_id: string;
-+  actual_qty: number;
-+  expected_qty_snapshot: number;
-+  checked_at: string;
++  complaint_key: string;
++  resolution_note: string | null;
++  resolved_by: string;
++  resolved_at: string;
 +};
 +
-+type JobRow = {
-+  id: string;
-+  property_id: string;
-+  assigned_to_user_id: string | null;
-+  completed_at: string | null;
-+};
-+
-+/** One guest-reported problem: hygiene photos, written notes, missing items. */
-+type Complaint = {
-+  key: string;
-+  propertyId: string;
-+  sessionId: string | null;
-+  reportedAt: string;
-+  rating: number | null;
-+  notes: string | null;
-+  photos: PhotoRow[];
-+  shortages: ShortageRow[];
-+};
-+
-+function Stars({ value }: { value: number }) {
-+  return (
-+    <span className="flex shrink-0 items-center gap-0.5">
-+      {Array.from({ length: 5 }, (_, star) => (
-+        <Star
-+          key={star}
-+          className={cn(
-+            "h-3.5 w-3.5",
-+            star < value ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30",
-+          )}
-+          aria-hidden="true"
-+        />
-+      ))}
-+    </span>
-+  );
-+}
-+
- function ReviewsPage() {
-   const t = useT();
-   const qc = useQueryClient();
-   const { groupId } = useActiveGroup();
-   const { data: profile, isLoading: profileLoading } = useProfile();
-+  const location = useLocation();
-+  const complaintsRef = useRef<HTMLElement | null>(null);
+ /** One guest-reported problem: hygiene photos, written notes, missing items. */
+ type Complaint = {
+   key: string;
+@@ -73,6 +100,9 @@ type Complaint = {
+   shortages: ShortageRow[];
+ };
  
-   const reviewsQ = useQuery({
-     queryKey: ["reviews", groupId],
-@@ -56,6 +108,18 @@ function ReviewsPage() {
-     refetchOnWindowFocus: true,
-     refetchInterval: 20_000,
-     queryFn: async () => {
-+      const empty = {
-+        reviews: [] as ReviewRow[],
-+        stays: [] as StayReview[],
-+        photos: [] as PhotoRow[],
-+        shortages: [] as ShortageRow[],
-+        amenityNames: {} as Record<string, string>,
-+        roomCodes: {} as Record<string, string>,
-+        jobs: [] as JobRow[],
-+        properties: [] as { id: string; name: string }[],
-+        cleaners: [] as { user_id: string; display_name: string | null; username: string | null }[],
-+      };
++/** Reviews and complaints share one dataset but are two separate surfaces. */
++type Tab = "reviews" | "complaints";
 +
-       const { data: properties, error: propsError } = await supabase
-         .from("properties")
-         .select("id, name")
-@@ -63,14 +127,7 @@ function ReviewsPage() {
-       if (propsError) throw propsError;
+ function Stars({ value }: { value: number }) {
+   return (
+     <span className="flex shrink-0 items-center gap-0.5">
+@@ -98,6 +128,27 @@ function ReviewsPage() {
+   const location = useLocation();
+   const complaintsRef = useRef<HTMLElement | null>(null);
  
-       const propertyIds = (properties ?? []).map((property) => property.id);
--      if (propertyIds.length === 0) {
--        return {
--          reviews: [] as ReviewRow[],
--          stays: [] as StayReview[],
--          properties: properties ?? [],
--          cleaners: [],
--        };
--      }
-+      if (propertyIds.length === 0) return { ...empty, properties: properties ?? [] };
- 
-       const { data: reviews, error: reviewsError } = await supabase
-         .from("cleaner_ratings")
-@@ -83,12 +140,71 @@ function ReviewsPage() {
-       // ratings never referenced a cleaner, so they were invisible here.
-       const { data: stays } = await supabase
-         .from("room_condition_submissions")
--        .select("id, property_id, overall_rating, notes, submitted_at")
-+        .select("id, property_id, customer_session_id, overall_rating, notes, submitted_at")
-         .in("property_id", propertyIds)
--        .not("overall_rating", "is", null)
-         .order("submitted_at", { ascending: false });
- 
--      const cleanerIds = Array.from(new Set((reviews ?? []).map((review) => review.cleaner_user_id)));
-+      const stayRows = (stays ?? []) as StayReview[];
-+      const submissionIds = stayRows.map((stay) => stay.id);
-+      const sessionIds = stayRows
-+        .map((stay) => stay.customer_session_id)
-+        .filter((id): id is string => !!id);
-+
-+      // Hygiene evidence attached to a stay report.
-+      const { data: photos } = submissionIds.length
-+        ? await supabase
-+            .from("room_condition_photos")
-+            .select("id, submission_id, photo_url")
-+            .in("submission_id", submissionIds)
-+        : { data: [] as PhotoRow[] };
-+
-+      // Missing/short amenities counted by the guest.
-+      const { data: checks } = await supabase
-+        .from("amenity_checks")
-+        .select(
-+          "id, property_id, customer_session_id, amenity_definition_id, actual_qty, expected_qty_snapshot, checked_at",
-+        )
-+        .in("property_id", propertyIds)
-+        .eq("role", "customer")
-+        .eq("is_discrepancy", true)
-+        .order("checked_at", { ascending: false });
-+
-+      // Only a shortage is a complaint; a guest counting extra items is not.
-+      const shortages = ((checks ?? []) as ShortageRow[]).filter(
-+        (check) => check.actual_qty < check.expected_qty_snapshot,
-+      );
-+
-+      const amenityIds = Array.from(new Set(shortages.map((row) => row.amenity_definition_id)));
-+      const { data: amenities } = amenityIds.length
-+        ? await supabase.from("amenity_definitions").select("id, name").in("id", amenityIds)
-+        : { data: [] as { id: string; name: string }[] };
-+
-+      const allSessionIds = Array.from(
-+        new Set([
-+          ...sessionIds,
-+          ...shortages.map((row) => row.customer_session_id).filter((id): id is string => !!id),
-+        ]),
-+      );
-+      const { data: sessions } = allSessionIds.length
-+        ? await supabase.from("customer_sessions").select("id, room_code").in("id", allSessionIds)
-+        : { data: [] as { id: string; room_code: string }[] };
-+
-+      // "Who cleaned it": the last clean completed before the guest reported.
-+      const { data: jobs } = await supabase
-+        .from("cleaning_jobs")
-+        .select("id, property_id, assigned_to_user_id, completed_at")
-+        .in("property_id", propertyIds)
-+        .not("assigned_to_user_id", "is", null)
-+        .not("completed_at", "is", null)
-+        .order("completed_at", { ascending: false });
-+
-+      const jobRows = (jobs ?? []) as JobRow[];
-+      const cleanerIds = Array.from(
-+        new Set([
-+          ...(reviews ?? []).map((review) => review.cleaner_user_id),
-+          ...jobRows.map((job) => job.assigned_to_user_id).filter((id): id is string => !!id),
-+        ]),
-+      );
-       const { data: cleaners } = cleanerIds.length
-         ? await supabase
-             .from("profiles")
-@@ -98,7 +214,12 @@ function ReviewsPage() {
- 
-       return {
-         reviews: (reviews ?? []) as ReviewRow[],
--        stays: (stays ?? []) as StayReview[],
-+        stays: stayRows,
-+        photos: (photos ?? []) as PhotoRow[],
-+        shortages,
-+        amenityNames: Object.fromEntries((amenities ?? []).map((row) => [row.id, row.name])),
-+        roomCodes: Object.fromEntries((sessions ?? []).map((row) => [row.id, row.room_code])),
-+        jobs: jobRows,
-         properties: properties ?? [],
-         cleaners: cleaners ?? [],
-       };
-@@ -107,36 +228,151 @@ function ReviewsPage() {
- 
-   // Live updates: a review submitted by a guest shows up without a reload.
-   useEffect(() => {
-+    const invalidate = () => {
-+      qc.invalidateQueries({ queryKey: ["reviews"] });
-+    };
-     const channel = supabase
-       .channel("reviews-feed")
--      .on("postgres_changes", { event: "*", schema: "public", table: "cleaner_ratings" }, () => {
--        qc.invalidateQueries({ queryKey: ["reviews"] });
--      })
-+      .on(
-+        "postgres_changes",
-+        { event: "*", schema: "public", table: "cleaner_ratings" },
-+        invalidate,
-+      )
-       .on(
-         "postgres_changes",
-         { event: "*", schema: "public", table: "room_condition_submissions" },
--        () => {
--          qc.invalidateQueries({ queryKey: ["reviews"] });
--        },
-+        invalidate,
-       )
-+      .on(
-+        "postgres_changes",
-+        { event: "*", schema: "public", table: "room_condition_photos" },
-+        invalidate,
-+      )
-+      .on("postgres_changes", { event: "*", schema: "public", table: "amenity_checks" }, invalidate)
-       .subscribe();
-     return () => {
-       supabase.removeChannel(channel);
-     };
-   }, [qc]);
- 
--  if (!profileLoading && profile?.primary_role !== "owner" && profile?.primary_role !== "hr_company") {
-+  const reviews = useMemo(() => reviewsQ.data?.reviews ?? [], [reviewsQ.data]);
-+  const stays = useMemo(() => reviewsQ.data?.stays ?? [], [reviewsQ.data]);
-+
-+  // A complaint is: hygiene photos, a written note, or a counted shortage.
-+  const complaints = useMemo<Complaint[]>(() => {
-+    const data = reviewsQ.data;
-+    if (!data) return [];
-+
-+    const photosBySubmission = new Map<string, PhotoRow[]>();
-+    for (const photo of data.photos) {
-+      const list = photosBySubmission.get(photo.submission_id) ?? [];
-+      list.push(photo);
-+      photosBySubmission.set(photo.submission_id, list);
-+    }
-+
-+    const shortagesBySession = new Map<string, ShortageRow[]>();
-+    const orphanShortages: ShortageRow[] = [];
-+    for (const shortage of data.shortages) {
-+      if (!shortage.customer_session_id) {
-+        orphanShortages.push(shortage);
-+        continue;
-+      }
-+      const list = shortagesBySession.get(shortage.customer_session_id) ?? [];
-+      list.push(shortage);
-+      shortagesBySession.set(shortage.customer_session_id, list);
-+    }
-+
-+    const built: Complaint[] = [];
-+    const usedSessions = new Set<string>();
-+
-+    for (const stay of data.stays) {
-+      const photos = photosBySubmission.get(stay.id) ?? [];
-+      const shortages = stay.customer_session_id
-+        ? (shortagesBySession.get(stay.customer_session_id) ?? [])
-+        : [];
-+      if (stay.customer_session_id) usedSessions.add(stay.customer_session_id);
-+      const hasNotes = !!stay.notes && stay.notes.trim().length > 0;
-+      if (photos.length === 0 && shortages.length === 0 && !hasNotes) continue;
-+      built.push({
-+        key: stay.id,
-+        propertyId: stay.property_id,
-+        sessionId: stay.customer_session_id,
-+        reportedAt: stay.submitted_at,
-+        rating: stay.overall_rating,
-+        notes: hasNotes ? stay.notes : null,
-+        photos,
-+        shortages,
-+      });
-+    }
-+
-+    // Shortages counted without a stay report still deserve a card.
-+    for (const [sessionId, shortages] of shortagesBySession) {
-+      if (usedSessions.has(sessionId)) continue;
-+      built.push({
-+        key: `session-${sessionId}`,
-+        propertyId: shortages[0].property_id,
-+        sessionId,
-+        reportedAt: shortages[0].checked_at,
-+        rating: null,
-+        notes: null,
-+        photos: [],
-+        shortages,
-+      });
-+    }
-+    for (const shortage of orphanShortages) {
-+      built.push({
-+        key: `check-${shortage.id}`,
-+        propertyId: shortage.property_id,
-+        sessionId: null,
-+        reportedAt: shortage.checked_at,
-+        rating: null,
-+        notes: null,
-+        photos: [],
-+        shortages: [shortage],
-+      });
-+    }
-+
-+    return built.sort((a, b) => b.reportedAt.localeCompare(a.reportedAt));
-+  }, [reviewsQ.data]);
-+
 +  // Notifications deep-link here with ?section=complaints.
 +  const wantsComplaints =
 +    new URLSearchParams(location.searchStr ?? "").get("section") === "complaints";
-+  useEffect(() => {
-+    if (!wantsComplaints || reviewsQ.isLoading) return;
-+    complaintsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-+  }, [wantsComplaints, reviewsQ.isLoading, complaints.length]);
 +
-+  if (
-+    !profileLoading &&
-+    profile?.primary_role !== "owner" &&
-+    profile?.primary_role !== "hr_company"
-+  ) {
-     return <Navigate to="/dashboard" replace />;
-   }
++  const [tab, setTab] = useState<Tab>(wantsComplaints ? "complaints" : "reviews");
++
++  // Complaint cards can be read as a list or as compact tiles, exactly like
++  // the property catalog. The choice is remembered per browser.
++  const prefs = useViewPrefs("complaints");
++  const initialPrefs = prefs.read();
++  const [view, setView] = useState<ViewMode>(initialPrefs.view);
++  const [size, setSize] = useState<CardSize>(initialPrefs.size);
++  const setViewMode = (v: ViewMode) => {
++    setView(v);
++    prefs.write({ view: v, size });
++  };
++  const setCardSize = (s: CardSize) => {
++    setSize(s);
++    prefs.write({ view, size: s });
++  };
++
+   const reviewsQ = useQuery({
+     queryKey: ["reviews", groupId],
+     enabled: !!groupId,
+@@ -118,6 +169,7 @@ function ReviewsPage() {
+         jobs: [] as JobRow[],
+         properties: [] as { id: string; name: string }[],
+         cleaners: [] as { user_id: string; display_name: string | null; username: string | null }[],
++        resolutions: [] as ResolutionRow[],
+       };
  
--  const reviews = reviewsQ.data?.reviews ?? [];
--  const stays = reviewsQ.data?.stays ?? [];
+       const { data: properties, error: propsError } = await supabase
+@@ -199,10 +251,20 @@ function ReviewsPage() {
+         .order("completed_at", { ascending: false });
+ 
+       const jobRows = (jobs ?? []) as JobRow[];
++
++      // Which complaints the owner already dealt with.
++      const { data: resolutions } = await supabase
++        .from("complaint_resolutions")
++        .select("id, property_id, complaint_key, resolution_note, resolved_by, resolved_at")
++        .in("property_id", propertyIds);
++
++      const resolutionRows = (resolutions ?? []) as ResolutionRow[];
++
+       const cleanerIds = Array.from(
+         new Set([
+           ...(reviews ?? []).map((review) => review.cleaner_user_id),
+           ...jobRows.map((job) => job.assigned_to_user_id).filter((id): id is string => !!id),
++          ...resolutionRows.map((row) => row.resolved_by),
+         ]),
+       );
+       const { data: cleaners } = cleanerIds.length
+@@ -222,6 +284,7 @@ function ReviewsPage() {
+         jobs: jobRows,
+         properties: properties ?? [],
+         cleaners: cleaners ?? [],
++        resolutions: resolutionRows,
+       };
+     },
+   });
+@@ -249,6 +312,11 @@ function ReviewsPage() {
+         invalidate,
+       )
+       .on("postgres_changes", { event: "*", schema: "public", table: "amenity_checks" }, invalidate)
++      .on(
++        "postgres_changes",
++        { event: "*", schema: "public", table: "complaint_resolutions" },
++        invalidate,
++      )
+       .subscribe();
+     return () => {
+       supabase.removeChannel(channel);
+@@ -335,11 +403,49 @@ function ReviewsPage() {
+     return built.sort((a, b) => b.reportedAt.localeCompare(a.reportedAt));
+   }, [reviewsQ.data]);
+ 
+-  // Notifications deep-link here with ?section=complaints.
+-  const wantsComplaints =
+-    new URLSearchParams(location.searchStr ?? "").get("section") === "complaints";
++  const resolutionsByKey = useMemo(() => {
++    const map = new Map<string, ResolutionRow>();
++    for (const row of reviewsQ.data?.resolutions ?? []) map.set(row.complaint_key, row);
++    return map;
++  }, [reviewsQ.data]);
++
++  const openComplaints = complaints.filter((complaint) => !resolutionsByKey.has(complaint.key));
++  const resolvedComplaints = complaints.filter((complaint) => resolutionsByKey.has(complaint.key));
++
++  // Only the owner can close a complaint out; the migration enforces the same
++  // rule at the database level, this just hides a button that would fail.
++  const canResolve = profile?.primary_role === "owner";
++
++  const resolveM = useMutation({
++    mutationFn: async ({ complaint, resolve }: { complaint: Complaint; resolve: boolean }) => {
++      if (resolve) {
++        const { error } = await supabase.from("complaint_resolutions").insert({
++          property_id: complaint.propertyId,
++          complaint_key: complaint.key,
++          resolved_by: profile!.user_id,
++        });
++        if (error) throw error;
++      } else {
++        const { error } = await supabase
++          .from("complaint_resolutions")
++          .delete()
++          .eq("complaint_key", complaint.key);
++        if (error) throw error;
++      }
++      return resolve;
++    },
++    onSuccess: (resolve) => {
++      toast.success(resolve ? t("reviews.resolveSaved") : t("reviews.reopenSaved"));
++      qc.invalidateQueries({ queryKey: ["reviews"] });
++    },
++    onError: (error: unknown) => {
++      toast.error(error instanceof Error ? error.message : t("common.error"));
++    },
++  });
++
+   useEffect(() => {
+     if (!wantsComplaints || reviewsQ.isLoading) return;
++    setTab("complaints");
+     complaintsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+   }, [wantsComplaints, reviewsQ.isLoading, complaints.length]);
+ 
+@@ -353,10 +459,11 @@ function ReviewsPage() {
+ 
    const propertyName = (id: string) =>
      reviewsQ.data?.properties.find((property) => property.id === id)?.name ?? id.slice(0, 8);
-   const cleanerName = (id: string) => {
-     const cleaner = reviewsQ.data?.cleaners.find((person) => person.user_id === id);
-     return cleaner?.display_name || cleaner?.username || id.slice(0, 8);
+-  const cleanerName = (id: string) => {
+-    const cleaner = reviewsQ.data?.cleaners.find((person) => person.user_id === id);
+-    return cleaner?.display_name || cleaner?.username || id.slice(0, 8);
++  const personName = (id: string) => {
++    const person = reviewsQ.data?.cleaners.find((candidate) => candidate.user_id === id);
++    return person?.display_name || person?.username || id.slice(0, 8);
    };
-+  const roomLabel = (complaint: Complaint) => {
-+    const code = complaint.sessionId ? reviewsQ.data?.roomCodes[complaint.sessionId] : null;
-+    const name = propertyName(complaint.propertyId);
-+    return code ? `${name} · ${t("reviews.room")} ${code}` : name;
-+  };
-+  /** The cleaner responsible: last clean completed before the guest reported. */
-+  const cleanerForComplaint = (complaint: Complaint) => {
-+    const job = (reviewsQ.data?.jobs ?? []).find(
-+      (candidate) =>
-+        candidate.property_id === complaint.propertyId &&
-+        !!candidate.completed_at &&
-+        candidate.completed_at <= complaint.reportedAt,
++  const cleanerName = personName;
+   const roomLabel = (complaint: Complaint) => {
+     const code = complaint.sessionId ? reviewsQ.data?.roomCodes[complaint.sessionId] : null;
+     const name = propertyName(complaint.propertyId);
+@@ -383,9 +490,160 @@ function ReviewsPage() {
+     : "—";
+   const ratedStays = stays.filter((stay) => !!stay.overall_rating);
+ 
++  /** One complaint card. `compact` drops the photo strip in small tiles. */
++  const ComplaintCard = ({ complaint, compact }: { complaint: Complaint; compact: boolean }) => {
++    const cleaner = cleanerForComplaint(complaint);
++    const resolution = resolutionsByKey.get(complaint.key);
++    return (
++      <li
++        className={cn(
++          "space-y-3 rounded-lg border p-4",
++          resolution
++            ? "border-border bg-muted/40"
++            : "border-destructive/30 bg-destructive/5",
++        )}
++      >
++        <div className="flex flex-wrap items-start justify-between gap-2">
++          <div className="min-w-0">
++            <p className="truncate font-medium">{roomLabel(complaint)}</p>
++            <p className="text-xs text-muted-foreground">
++              {t("reviews.cleanedBy")} {cleaner ?? t("reviews.unknownCleaner")} · {t("reviews.on")}{" "}
++              {new Date(complaint.reportedAt).toLocaleString()}
++            </p>
++          </div>
++          {complaint.rating != null && <Stars value={complaint.rating} />}
++        </div>
++
++        {complaint.shortages.length > 0 && (
++          <div className="space-y-1">
++            <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
++              <PackageMinus className="h-3.5 w-3.5" aria-hidden="true" />
++              {t("reviews.missingAmenities")}
++            </p>
++            <ul className="text-sm">
++              {complaint.shortages.map((shortage) => (
++                <li key={shortage.id}>
++                  {reviewsQ.data?.amenityNames[shortage.amenity_definition_id] ??
++                    shortage.amenity_definition_id.slice(0, 8)}
++                  {": "}
++                  {shortage.actual_qty} / {shortage.expected_qty_snapshot}
++                </li>
++              ))}
++            </ul>
++          </div>
++        )}
++
++        {complaint.notes && (
++          <div className="space-y-1">
++            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
++              {t("reviews.guestNotes")}
++            </p>
++            <p className={cn("text-sm", compact && "line-clamp-3")}>{complaint.notes}</p>
++          </div>
++        )}
++
++        {complaint.photos.length > 0 && (
++          <div className="space-y-1">
++            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
++              {t("reviews.hygienePhotos")}
++            </p>
++            <div className="flex flex-wrap gap-2">
++              {(compact ? complaint.photos.slice(0, 2) : complaint.photos).map((photo) => (
++                <SignedPhoto
++                  key={photo.id}
++                  path={photo.photo_url}
++                  alt={t("reviews.hygienePhotos")}
++                  className={cn("w-24", compact ? COVER_HEIGHT.sm : "h-24")}
++                />
++              ))}
++            </div>
++          </div>
++        )}
++
++        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2">
++          {resolution ? (
++            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
++              <CheckCircle2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
++              {t("reviews.resolved")} · {t("reviews.resolvedBy")}{" "}
++              {personName(resolution.resolved_by)} · {t("reviews.on")}{" "}
++              {new Date(resolution.resolved_at).toLocaleString()}
++            </p>
++          ) : (
++            <span className="text-xs font-medium uppercase tracking-wide text-destructive">
++              {t("reviews.openComplaints")}
++            </span>
++          )}
++          {canResolve && (
++            <Button
++              type="button"
++              size="sm"
++              variant={resolution ? "outline" : "default"}
++              disabled={resolveM.isPending}
++              onClick={() => resolveM.mutate({ complaint, resolve: !resolution })}
++            >
++              {resolution ? (
++                <>
++                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
++                  {t("reviews.reopen")}
++                </>
++              ) : (
++                <>
++                  <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
++                  {t("reviews.resolve")}
++                </>
++              )}
++            </Button>
++          )}
++        </div>
++      </li>
 +    );
-+    return job?.assigned_to_user_id ? cleanerName(job.assigned_to_user_id) : null;
 +  };
 +
-   const cleanerIds = Array.from(new Set(reviews.map((review) => review.cleaner_user_id)));
-   const allRatings = [
-     ...reviews.map((review) => review.rating),
-@@ -145,6 +381,7 @@ function ReviewsPage() {
-   const average = allRatings.length
-     ? (allRatings.reduce((sum, value) => sum + value, 0) / allRatings.length).toFixed(1)
-     : "—";
-+  const ratedStays = stays.filter((stay) => !!stay.overall_rating);
- 
++  const ComplaintList = ({ items }: { items: Complaint[] }) =>
++    view === "list" ? (
++      <ul className="space-y-4">
++        {items.map((complaint) => (
++          <ComplaintCard key={complaint.key} complaint={complaint} compact={false} />
++        ))}
++      </ul>
++    ) : (
++      <ul className={GRID_COLS[size]}>
++        {items.map((complaint) => (
++          <ComplaintCard key={complaint.key} complaint={complaint} compact={size === "sm"} />
++        ))}
++      </ul>
++    );
++
    return (
      <>
-@@ -156,111 +393,204 @@ function ReviewsPage() {
-         </div>
-       ) : (
+       <PageHeader title={t("reviews.title")} description={t("reviews.subtitle")} />
++
++      {/* Reviews / complaints switch. Reviews is the default surface; every
++          complaint lives behind the complaints side of this toggle. */}
++      <div className="mb-6 inline-flex rounded-lg border border-border p-1">
++        {(["reviews", "complaints"] as const).map((value) => (
++          <button
++            key={value}
++            type="button"
++            aria-pressed={tab === value}
++            onClick={() => setTab(value)}
++            className={cn(
++              "rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
++              tab === value
++                ? "bg-primary text-primary-foreground"
++                : "text-muted-foreground hover:text-foreground",
++            )}
++          >
++            {value === "reviews" ? t("reviews.tabReviews") : t("reviews.tabComplaints")}
++            {value === "complaints" && openComplaints.length > 0 && (
++              <span className="ml-2 rounded-full bg-destructive/15 px-1.5 py-0.5 text-xs text-destructive">
++                {openComplaints.length}
++              </span>
++            )}
++          </button>
++        ))}
++      </div>
++
+       {reviewsQ.isLoading ? (
          <div className="space-y-6">
--          <div className="grid gap-4 sm:grid-cols-3">
-+          <div className="grid gap-4 sm:grid-cols-4">
-             <StatCard label={t("reviews.average")} value={average} icon={Star} delay={0} />
--            <StatCard label={t("reviews.count")} value={allRatings.length} icon={Building2} delay={80} />
--            <StatCard label={t("reviews.pickCleaner")} value={cleanerIds.length} icon={UserRound} delay={160} />
-+            <StatCard
-+              label={t("reviews.count")}
-+              value={allRatings.length}
-+              icon={Building2}
-+              delay={80}
-+            />
-+            <StatCard
-+              label={t("reviews.pickCleaner")}
-+              value={cleanerIds.length}
-+              icon={UserRound}
-+              delay={160}
-+            />
-+            <StatCard
-+              label={t("reviews.complaints")}
-+              value={complaints.length}
-+              icon={AlertTriangle}
-+              delay={240}
-+            />
+           <StatsSkeleton count={3} />
+@@ -409,97 +667,101 @@ function ReviewsPage() {
+             />
+             <StatCard
+               label={t("reviews.complaints")}
+-              value={complaints.length}
++              value={openComplaints.length}
+               icon={AlertTriangle}
+               delay={240}
+             />
            </div>
  
--          {cleanerIds.length === 0 && stays.length === 0 ? (
-+          {cleanerIds.length === 0 && ratedStays.length === 0 && complaints.length === 0 ? (
-             <section className="surface p-8 text-center text-sm text-muted-foreground">
-               {t("reviews.empty")}
-             </section>
-           ) : (
-             <>
--            <div className="grid gap-4 lg:grid-cols-2">
--              {cleanerIds.map((cleanerId, index) => {
--                const cleanerReviews = reviews.filter((review) => review.cleaner_user_id === cleanerId);
--                const cleanerAverage = (
--                  cleanerReviews.reduce((sum, review) => sum + review.rating, 0) / cleanerReviews.length
--                ).toFixed(1);
--                return (
--                  <section
--                    key={cleanerId}
--                    className="surface space-y-4 p-5 animate-card-enter"
--                    style={{ animationDelay: `${index * 50}ms` }}
--                  >
--                    <header className="flex items-start justify-between gap-3">
--                      <div className="min-w-0">
--                        <h2 className="truncate text-lg">{cleanerName(cleanerId)}</h2>
--                        <p className="text-sm text-muted-foreground">
--                          {cleanerReviews.length} {t("reviews.count").toLowerCase()}
--                        </p>
--                      </div>
--                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
--                        <Star className="h-4 w-4 fill-current" aria-hidden="true" />
--                        {cleanerAverage}
--                      </span>
--                    </header>
--
--                    <ul className="divide-y divide-border text-sm">
--                      {cleanerReviews.map((review) => (
--                        <li key={review.id} className="space-y-2 py-3">
--                          <div className="flex items-center justify-between gap-3">
-+              {/* Feedback: ratings only. Anything a guest complained about lives
-+                  in the complaints section below, with room and cleaner. */}
-+              <div className="grid gap-4 lg:grid-cols-2">
-+                {cleanerIds.map((cleanerId, index) => {
-+                  const cleanerReviews = reviews.filter(
-+                    (review) => review.cleaner_user_id === cleanerId,
-+                  );
-+                  const cleanerAverage = (
-+                    cleanerReviews.reduce((sum, review) => sum + review.rating, 0) /
-+                    cleanerReviews.length
-+                  ).toFixed(1);
-+                  return (
-+                    <section
-+                      key={cleanerId}
-+                      className="surface space-y-4 p-5 animate-card-enter"
-+                      style={{ animationDelay: `${index * 50}ms` }}
-+                    >
-+                      <header className="flex items-start justify-between gap-3">
-+                        <div className="min-w-0">
-+                          <h2 className="truncate text-lg">{cleanerName(cleanerId)}</h2>
-+                          <p className="text-sm text-muted-foreground">
-+                            {cleanerReviews.length} {t("reviews.count").toLowerCase()}
-+                          </p>
-+                        </div>
-+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
-+                          <Star className="h-4 w-4 fill-current" aria-hidden="true" />
-+                          {cleanerAverage}
-+                        </span>
-+                      </header>
-+
-+                      <ul className="divide-y divide-border text-sm">
-+                        {cleanerReviews.map((review) => (
-+                          <li
-+                            key={review.id}
-+                            className="flex items-center justify-between gap-3 py-3"
-+                          >
-                             <span className="min-w-0 truncate text-muted-foreground">
--                              {t("reviews.forProperty")} {propertyName(review.property_id)} · {t("reviews.on")} {new Date(review.created_at).toLocaleDateString()}
-+                              {t("reviews.forProperty")} {propertyName(review.property_id)} ·{" "}
-+                              {t("reviews.on")} {new Date(review.created_at).toLocaleDateString()}
-                             </span>
--                            <span className="flex shrink-0 items-center gap-0.5">
--                              {Array.from({ length: 5 }, (_, star) => (
--                                <Star
--                                  key={star}
--                                  className={cn(
--                                    "h-3.5 w-3.5",
--                                    star < review.rating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30",
--                                  )}
--                                  aria-hidden="true"
--                                />
--                              ))}
--                            </span>
--                          </div>
--                          {review.comment && <p className="text-foreground">{review.comment}</p>}
--                        </li>
--                      ))}
--                    </ul>
--                  </section>
--                );
--              })}
--            </div>
--
--            {stays.length > 0 && (
--              <section className="surface space-y-3 p-5">
--                <header>
--                  <h2 className="text-lg">{t("reviews.stays")}</h2>
--                  <p className="text-sm text-muted-foreground">{t("reviews.staysSubtitle")}</p>
--                </header>
--                <ul className="divide-y divide-border text-sm">
--                  {stays.map((stay) => (
--                    <li key={stay.id} className="space-y-2 py-3">
--                      <div className="flex items-center justify-between gap-3">
-+                            <Stars value={review.rating} />
-+                          </li>
-+                        ))}
-+                      </ul>
-+                    </section>
-+                  );
-+                })}
-+              </div>
-+
-+              {ratedStays.length > 0 && (
-+                <section className="surface space-y-3 p-5">
-+                  <header>
-+                    <h2 className="text-lg">{t("reviews.stays")}</h2>
-+                    <p className="text-sm text-muted-foreground">{t("reviews.staysSubtitle")}</p>
-+                  </header>
-+                  <ul className="divide-y divide-border text-sm">
-+                    {ratedStays.map((stay) => (
-+                      <li key={stay.id} className="flex items-center justify-between gap-3 py-3">
-                         <span className="min-w-0 truncate text-muted-foreground">
--                          {t("reviews.forProperty")} {propertyName(stay.property_id)} · {t("reviews.on")}{" "}
--                          {new Date(stay.submitted_at).toLocaleDateString()}
--                        </span>
--                        <span className="flex shrink-0 items-center gap-0.5">
--                          {Array.from({ length: 5 }, (_, star) => (
--                            <Star
--                              key={star}
--                              className={cn(
--                                "h-3.5 w-3.5",
--                                star < (stay.overall_rating ?? 0)
--                                  ? "fill-amber-400 text-amber-400"
--                                  : "text-muted-foreground/30",
--                              )}
--                              aria-hidden="true"
--                            />
--                          ))}
-+                          {t("reviews.forProperty")} {propertyName(stay.property_id)} ·{" "}
-+                          {t("reviews.on")} {new Date(stay.submitted_at).toLocaleDateString()}
-                         </span>
--                      </div>
--                      {stay.notes && <p className="text-foreground">{stay.notes}</p>}
--                    </li>
--                  ))}
--                </ul>
-+                        <Stars value={stay.overall_rating ?? 0} />
-+                      </li>
-+                    ))}
-+                  </ul>
-+                </section>
-+              )}
-+
-+              {/* Complaints: hygiene photos, missing amenities, guest notes. */}
-+              <section
-+                id="complaints"
-+                ref={complaintsRef}
-+                className={cn(
-+                  "surface space-y-4 p-5 scroll-mt-28",
-+                  wantsComplaints && "ring-2 ring-destructive/40",
-+                )}
-+              >
-+                <header className="flex items-start gap-2">
-+                  <AlertTriangle
-+                    className="mt-0.5 h-5 w-5 shrink-0 text-destructive"
-+                    aria-hidden="true"
-+                  />
-+                  <div>
-+                    <h2 className="text-lg">{t("reviews.complaints")}</h2>
-+                    <p className="text-sm text-muted-foreground">
-+                      {t("reviews.complaintsSubtitle")}
-+                    </p>
-+                  </div>
-+                </header>
-+
-+                {complaints.length === 0 ? (
-+                  <p className="py-4 text-center text-sm text-muted-foreground">
-+                    {t("reviews.complaintsEmpty")}
-+                  </p>
-+                ) : (
-+                  <ul className="space-y-4">
-+                    {complaints.map((complaint) => {
-+                      const cleaner = cleanerForComplaint(complaint);
-+                      return (
-+                        <li
-+                          key={complaint.key}
-+                          className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4"
-+                        >
-+                          <div className="flex flex-wrap items-start justify-between gap-2">
-+                            <div className="min-w-0">
-+                              <p className="truncate font-medium">{roomLabel(complaint)}</p>
-+                              <p className="text-xs text-muted-foreground">
-+                                {t("reviews.cleanedBy")} {cleaner ?? t("reviews.unknownCleaner")} ·{" "}
-+                                {t("reviews.on")} {new Date(complaint.reportedAt).toLocaleString()}
-+                              </p>
-+                            </div>
-+                            {complaint.rating != null && <Stars value={complaint.rating} />}
+-          {cleanerIds.length === 0 && ratedStays.length === 0 && complaints.length === 0 ? (
+-            <section className="surface p-8 text-center text-sm text-muted-foreground">
+-              {t("reviews.empty")}
+-            </section>
++          {tab === "reviews" ? (
++            cleanerIds.length === 0 && ratedStays.length === 0 ? (
++              <section className="surface p-8 text-center text-sm text-muted-foreground">
++                {t("reviews.empty")}
++              </section>
++            ) : (
++              <>
++                {/* Feedback: ratings only. Anything a guest complained about
++                    lives behind the complaints toggle, with room and cleaner. */}
++                <div className="grid gap-4 lg:grid-cols-2">
++                  {cleanerIds.map((cleanerId, index) => {
++                    const cleanerReviews = reviews.filter(
++                      (review) => review.cleaner_user_id === cleanerId,
++                    );
++                    const cleanerAverage = (
++                      cleanerReviews.reduce((sum, review) => sum + review.rating, 0) /
++                      cleanerReviews.length
++                    ).toFixed(1);
++                    return (
++                      <section
++                        key={cleanerId}
++                        className="surface space-y-4 p-5 animate-card-enter"
++                        style={{ animationDelay: `${index * 50}ms` }}
++                      >
++                        <header className="flex items-start justify-between gap-3">
++                          <div className="min-w-0">
++                            <h2 className="truncate text-lg">{cleanerName(cleanerId)}</h2>
++                            <p className="text-sm text-muted-foreground">
++                              {cleanerReviews.length} {t("reviews.count").toLowerCase()}
++                            </p>
 +                          </div>
++                          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
++                            <Star className="h-4 w-4 fill-current" aria-hidden="true" />
++                            {cleanerAverage}
++                          </span>
++                        </header>
 +
-+                          {complaint.shortages.length > 0 && (
-+                            <div className="space-y-1">
-+                              <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-+                                <PackageMinus className="h-3.5 w-3.5" aria-hidden="true" />
-+                                {t("reviews.missingAmenities")}
-+                              </p>
-+                              <ul className="text-sm">
-+                                {complaint.shortages.map((shortage) => (
-+                                  <li key={shortage.id}>
-+                                    {reviewsQ.data?.amenityNames[shortage.amenity_definition_id] ??
-+                                      shortage.amenity_definition_id.slice(0, 8)}
-+                                    {": "}
-+                                    {shortage.actual_qty} / {shortage.expected_qty_snapshot}
-+                                  </li>
-+                                ))}
-+                              </ul>
-+                            </div>
-+                          )}
++                        <ul className="divide-y divide-border text-sm">
++                          {cleanerReviews.map((review) => (
++                            <li
++                              key={review.id}
++                              className="flex items-center justify-between gap-3 py-3"
++                            >
++                              <span className="min-w-0 truncate text-muted-foreground">
++                                {t("reviews.forProperty")} {propertyName(review.property_id)} ·{" "}
++                                {t("reviews.on")} {new Date(review.created_at).toLocaleDateString()}
++                              </span>
++                              <Stars value={review.rating} />
++                            </li>
++                          ))}
++                        </ul>
++                      </section>
++                    );
++                  })}
++                </div>
 +
-+                          {complaint.notes && (
-+                            <div className="space-y-1">
-+                              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-+                                {t("reviews.guestNotes")}
-+                              </p>
-+                              <p className="text-sm">{complaint.notes}</p>
-+                            </div>
-+                          )}
-+
-+                          {complaint.photos.length > 0 && (
-+                            <div className="space-y-1">
-+                              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-+                                {t("reviews.hygienePhotos")}
-+                              </p>
-+                              <div className="flex flex-wrap gap-2">
-+                                {complaint.photos.map((photo) => (
-+                                  <SignedPhoto
-+                                    key={photo.id}
-+                                    path={photo.photo_url}
-+                                    alt={t("reviews.hygienePhotos")}
-+                                    className="h-24 w-24"
-+                                  />
-+                                ))}
-+                              </div>
-+                            </div>
-+                          )}
++                {ratedStays.length > 0 && (
++                  <section className="surface space-y-3 p-5">
++                    <header>
++                      <h2 className="text-lg">{t("reviews.stays")}</h2>
++                      <p className="text-sm text-muted-foreground">{t("reviews.staysSubtitle")}</p>
++                    </header>
++                    <ul className="divide-y divide-border text-sm">
++                      {ratedStays.map((stay) => (
++                        <li key={stay.id} className="flex items-center justify-between gap-3 py-3">
++                          <span className="min-w-0 truncate text-muted-foreground">
++                            {t("reviews.forProperty")} {propertyName(stay.property_id)} ·{" "}
++                            {t("reviews.on")} {new Date(stay.submitted_at).toLocaleDateString()}
++                          </span>
++                          <Stars value={stay.overall_rating ?? 0} />
 +                        </li>
-+                      );
-+                    })}
-+                  </ul>
++                      ))}
++                    </ul>
++                  </section>
 +                )}
-               </section>
--            )}
-             </>
++              </>
++            )
+           ) : (
+-            <>
+-              {/* Feedback: ratings only. Anything a guest complained about lives
+-                  in the complaints section below, with room and cleaner. */}
+-              <div className="grid gap-4 lg:grid-cols-2">
+-                {cleanerIds.map((cleanerId, index) => {
+-                  const cleanerReviews = reviews.filter(
+-                    (review) => review.cleaner_user_id === cleanerId,
+-                  );
+-                  const cleanerAverage = (
+-                    cleanerReviews.reduce((sum, review) => sum + review.rating, 0) /
+-                    cleanerReviews.length
+-                  ).toFixed(1);
+-                  return (
+-                    <section
+-                      key={cleanerId}
+-                      className="surface space-y-4 p-5 animate-card-enter"
+-                      style={{ animationDelay: `${index * 50}ms` }}
+-                    >
+-                      <header className="flex items-start justify-between gap-3">
+-                        <div className="min-w-0">
+-                          <h2 className="truncate text-lg">{cleanerName(cleanerId)}</h2>
+-                          <p className="text-sm text-muted-foreground">
+-                            {cleanerReviews.length} {t("reviews.count").toLowerCase()}
+-                          </p>
+-                        </div>
+-                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
+-                          <Star className="h-4 w-4 fill-current" aria-hidden="true" />
+-                          {cleanerAverage}
+-                        </span>
+-                      </header>
+-
+-                      <ul className="divide-y divide-border text-sm">
+-                        {cleanerReviews.map((review) => (
+-                          <li
+-                            key={review.id}
+-                            className="flex items-center justify-between gap-3 py-3"
+-                          >
+-                            <span className="min-w-0 truncate text-muted-foreground">
+-                              {t("reviews.forProperty")} {propertyName(review.property_id)} ·{" "}
+-                              {t("reviews.on")} {new Date(review.created_at).toLocaleDateString()}
+-                            </span>
+-                            <Stars value={review.rating} />
+-                          </li>
+-                        ))}
+-                      </ul>
+-                    </section>
+-                  );
+-                })}
+-              </div>
+-
+-              {ratedStays.length > 0 && (
+-                <section className="surface space-y-3 p-5">
+-                  <header>
+-                    <h2 className="text-lg">{t("reviews.stays")}</h2>
+-                    <p className="text-sm text-muted-foreground">{t("reviews.staysSubtitle")}</p>
+-                  </header>
+-                  <ul className="divide-y divide-border text-sm">
+-                    {ratedStays.map((stay) => (
+-                      <li key={stay.id} className="flex items-center justify-between gap-3 py-3">
+-                        <span className="min-w-0 truncate text-muted-foreground">
+-                          {t("reviews.forProperty")} {propertyName(stay.property_id)} ·{" "}
+-                          {t("reviews.on")} {new Date(stay.submitted_at).toLocaleDateString()}
+-                        </span>
+-                        <Stars value={stay.overall_rating ?? 0} />
+-                      </li>
+-                    ))}
+-                  </ul>
+-                </section>
++            /* Complaints: hygiene photos, missing amenities, guest notes. */
++            <section
++              id="complaints"
++              ref={complaintsRef}
++              className={cn(
++                "surface space-y-4 p-5 scroll-mt-28",
++                wantsComplaints && "ring-2 ring-destructive/40",
+               )}
+-
+-              {/* Complaints: hygiene photos, missing amenities, guest notes. */}
+-              <section
+-                id="complaints"
+-                ref={complaintsRef}
+-                className={cn(
+-                  "surface space-y-4 p-5 scroll-mt-28",
+-                  wantsComplaints && "ring-2 ring-destructive/40",
+-                )}
+-              >
+-                <header className="flex items-start gap-2">
++            >
++              <header className="flex flex-wrap items-start justify-between gap-3">
++                <div className="flex items-start gap-2">
+                   <AlertTriangle
+                     className="mt-0.5 h-5 w-5 shrink-0 text-destructive"
+                     aria-hidden="true"
+@@ -510,84 +772,32 @@ function ReviewsPage() {
+                       {t("reviews.complaintsSubtitle")}
+                     </p>
+                   </div>
+-                </header>
++                </div>
++                {/* Same arrangement control as the property catalog. */}
++                <ViewToggle view={view} onView={setViewMode} size={size} onSize={setCardSize} />
++              </header>
++
++              {openComplaints.length === 0 ? (
++                <p className="py-4 text-center text-sm text-muted-foreground">
++                  {t("reviews.complaintsEmpty")}
++                </p>
++              ) : (
++                <ComplaintList items={openComplaints} />
++              )}
+ 
+-                {complaints.length === 0 ? (
+-                  <p className="py-4 text-center text-sm text-muted-foreground">
+-                    {t("reviews.complaintsEmpty")}
++              <div className="space-y-3 border-t border-border pt-4">
++                <h3 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
++                  {t("reviews.resolvedComplaints")}
++                </h3>
++                {resolvedComplaints.length === 0 ? (
++                  <p className="py-2 text-center text-sm text-muted-foreground">
++                    {t("reviews.resolvedEmpty")}
+                   </p>
+                 ) : (
+-                  <ul className="space-y-4">
+-                    {complaints.map((complaint) => {
+-                      const cleaner = cleanerForComplaint(complaint);
+-                      return (
+-                        <li
+-                          key={complaint.key}
+-                          className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4"
+-                        >
+-                          <div className="flex flex-wrap items-start justify-between gap-2">
+-                            <div className="min-w-0">
+-                              <p className="truncate font-medium">{roomLabel(complaint)}</p>
+-                              <p className="text-xs text-muted-foreground">
+-                                {t("reviews.cleanedBy")} {cleaner ?? t("reviews.unknownCleaner")} ·{" "}
+-                                {t("reviews.on")} {new Date(complaint.reportedAt).toLocaleString()}
+-                              </p>
+-                            </div>
+-                            {complaint.rating != null && <Stars value={complaint.rating} />}
+-                          </div>
+-
+-                          {complaint.shortages.length > 0 && (
+-                            <div className="space-y-1">
+-                              <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+-                                <PackageMinus className="h-3.5 w-3.5" aria-hidden="true" />
+-                                {t("reviews.missingAmenities")}
+-                              </p>
+-                              <ul className="text-sm">
+-                                {complaint.shortages.map((shortage) => (
+-                                  <li key={shortage.id}>
+-                                    {reviewsQ.data?.amenityNames[shortage.amenity_definition_id] ??
+-                                      shortage.amenity_definition_id.slice(0, 8)}
+-                                    {": "}
+-                                    {shortage.actual_qty} / {shortage.expected_qty_snapshot}
+-                                  </li>
+-                                ))}
+-                              </ul>
+-                            </div>
+-                          )}
+-
+-                          {complaint.notes && (
+-                            <div className="space-y-1">
+-                              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+-                                {t("reviews.guestNotes")}
+-                              </p>
+-                              <p className="text-sm">{complaint.notes}</p>
+-                            </div>
+-                          )}
+-
+-                          {complaint.photos.length > 0 && (
+-                            <div className="space-y-1">
+-                              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+-                                {t("reviews.hygienePhotos")}
+-                              </p>
+-                              <div className="flex flex-wrap gap-2">
+-                                {complaint.photos.map((photo) => (
+-                                  <SignedPhoto
+-                                    key={photo.id}
+-                                    path={photo.photo_url}
+-                                    alt={t("reviews.hygienePhotos")}
+-                                    className="h-24 w-24"
+-                                  />
+-                                ))}
+-                              </div>
+-                            </div>
+-                          )}
+-                        </li>
+-                      );
+-                    })}
+-                  </ul>
++                  <ComplaintList items={resolvedComplaints} />
+                 )}
+-              </section>
+-            </>
++              </div>
++            </section>
            )}
          </div>
        )}
-     </>
-   );
--}
-\ No newline at end of file
-+}
-diff --git a/supabase/migrations/20260810000000_complaints_and_hr_group_access.sql b/supabase/migrations/20260810000000_complaints_and_hr_group_access.sql
+diff --git a/src/routes/index.tsx b/src/routes/index.tsx
+index 7c6b2f0..f08292f 100644
+--- a/src/routes/index.tsx
++++ b/src/routes/index.tsx
+@@ -1,4 +1,4 @@
+-import { createFileRoute, Link } from "@tanstack/react-router";
++import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+ import {
+   CheckCircle2,
+   ClipboardCheck,
+@@ -12,10 +12,12 @@ import {
+   ChevronRight,
+   Menu,
+   X,
++  KeyRound,
+ } from "lucide-react";
+ import { useState } from "react";
+ 
+ import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
+ import { LanguageSwitcher } from "@/components/language-switcher";
+ import { useT } from "@/i18n";
+ import { cn } from "@/lib/utils";
+@@ -46,6 +48,16 @@ export const Route = createFileRoute("/")({
+   component: Landing,
+ });
+ 
++/** Anchor targets are fixed ids: deriving them from the translated label
++ *  produced hrefs like `#功能` that matched no section outside English. */
++const NAV_LINKS = [
++  { key: "landing.navFeatures" as const, href: "#features" },
++  { key: "landing.navHow" as const, href: "#how-it-works" },
++  { key: "landing.navPricing" as const, href: "#pricing" },
++  { key: "landing.navFaq" as const, href: "#faq" },
++  { key: "landing.navGuest" as const, href: "#guest" },
++];
++
+ const FEATURES = [
+   {
+     icon: ClipboardCheck,
+@@ -194,8 +206,18 @@ const FAQS = [
+ 
+ function Landing() {
+   const t = useT();
++  const navigate = useNavigate();
+   const [mobileOpen, setMobileOpen] = useState(false);
+   const [openFaq, setOpenFaq] = useState<number | null>(null);
++  const [stayCode, setStayCode] = useState("");
++
++  // The guest flow already exists at /g/$code; the landing page had no way in.
++  const openGuestPage = (event: React.FormEvent) => {
++    event.preventDefault();
++    const code = stayCode.trim();
++    if (!code) return;
++    navigate({ to: "/g/$code", params: { code }, search: {} });
++  };
+ 
+   return (
+     <div className="min-h-screen bg-background">
+@@ -204,13 +226,13 @@ function Landing() {
+         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+           <span className="font-display text-xl font-semibold">{t("app.name")}</span>
+           <div className="hidden items-center gap-1 md:flex">
+-            {(["landing.navFeatures", "landing.navHow", "landing.navPricing", "landing.navFaq"] as const).map((key) => (
++            {NAV_LINKS.map((item) => (
+               <a
+-                key={key}
+-                href={`#${t(key).toLowerCase().replace(/\s+/g, "-")}`}
++                key={item.key}
++                href={item.href}
+                 className="rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+               >
+-                {t(key)}
++                {t(item.key)}
+               </a>
+             ))}
+           </div>
+@@ -236,14 +258,14 @@ function Landing() {
+         {mobileOpen && (
+           <div className="border-t border-border px-4 pb-4 md:hidden">
+             <div className="flex flex-col gap-1 pt-2">
+-              {(["landing.navFeatures", "landing.navHow", "landing.navPricing", "landing.navFaq"] as const).map((key) => (
++              {NAV_LINKS.map((item) => (
+                 <a
+-                  key={key}
+-                  href={`#${t(key).toLowerCase().replace(/\s+/g, "-")}`}
++                  key={item.key}
++                  href={item.href}
+                   className="rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                   onClick={() => setMobileOpen(false)}
+                 >
+-                  {t(key)}
++                  {t(item.key)}
+                 </a>
+               ))}
+               <Link
+@@ -444,6 +466,33 @@ function Landing() {
+           </div>
+         </section>
+ 
++        {/* ---- Guest entry ---- */}
++        <section id="guest" className="scroll-mt-20 border-b border-border bg-card py-20 md:py-28">
++          <div className="mx-auto max-w-3xl px-6 text-center">
++            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
++              <KeyRound className="h-6 w-6" aria-hidden="true" />
++            </span>
++            <h2 className="mt-5 text-3xl font-display md:text-4xl">{t("landing.guestTitle")}</h2>
++            <p className="mx-auto mt-3 max-w-xl text-muted-foreground">{t("landing.guestBody")}</p>
++            <form
++              onSubmit={openGuestPage}
++              className="mx-auto mt-8 flex max-w-md flex-col gap-3 sm:flex-row"
++            >
++              <Input
++                value={stayCode}
++                onChange={(e) => setStayCode(e.target.value)}
++                placeholder={t("landing.guestCode")}
++                aria-label={t("landing.guestCode")}
++                autoComplete="off"
++              />
++              <Button type="submit" disabled={!stayCode.trim()}>
++                {t("landing.guestCta")}
++                <ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" />
++              </Button>
++            </form>
++          </div>
++        </section>
++
+         {/* ---- FAQ ---- */}
+         <section id="faq" className="scroll-mt-20 border-b border-border py-20 md:py-28">
+           <div className="mx-auto max-w-3xl px-6">
+@@ -520,6 +569,7 @@ function Landing() {
+                 <li><a href="#features" className="transition-colors hover:text-foreground">{t("landing.featuresLabel")}</a></li>
+                 <li><a href="#pricing" className="transition-colors hover:text-foreground">{t("landing.pricingLabel")}</a></li>
+                 <li><a href="#faq" className="transition-colors hover:text-foreground">{t("landing.faqLabel")}</a></li>
++                <li><a href="#guest" className="transition-colors hover:text-foreground">{t("landing.navGuest")}</a></li>
+               </ul>
+             </div>
+             <div>
+diff --git a/supabase/migrations/20260811000000_complaint_resolutions.sql b/supabase/migrations/20260811000000_complaint_resolutions.sql
 new file mode 100644
-index 0000000..5d14294
+index 0000000..ffe6bf1
 --- /dev/null
-+++ b/supabase/migrations/20260810000000_complaints_and_hr_group_access.sql
-@@ -0,0 +1,271 @@
-+-- Complaints section + cleaning-company group access.
++++ b/supabase/migrations/20260811000000_complaint_resolutions.sql
+@@ -0,0 +1,53 @@
++-- Owner-resolvable complaints.
 +--
-+-- Two independent problems are fixed here.
-+--
-+-- 1. Cleaning company (hr_company) stays stuck on the invite-code gate.
-+--    `redeem_invite_code` correctly inserts into `hr_affiliations`, but the
-+--    client (`useMyGroups` in src/hooks/use-app.tsx) reads the group through
-+--    the embedded relation `hr_affiliations -> owner_groups(id, name)`.
-+--    `owner_groups` only had two SELECT policies: "owner manages group"
-+--    (owner_user_id = auth.uid()) and "members read group"
-+--    (public.is_group_member(id), which does NOT consider HR affiliations).
-+--    So for an affiliated cleaning company the embed resolved to NULL, the
-+--    group list stayed empty, `needsGroup` in app-shell.tsx stayed true, and
-+--    the invite-code screen never went away. Adding an HR SELECT policy makes
-+--    the affiliation readable end to end.
-+--
-+-- 2. Guest complaints (hygiene photos, amenity shortages, written notes) had
-+--    no owner-facing surface and no notification. The reviews page now has a
-+--    dedicated complaints section, so notifications must deep-link to it and
-+--    new complaint kinds must raise a notification.
++-- The reviews page derives a complaint from three different guest artefacts
++-- (a room-condition submission, a guest session with amenity shortages, or a
++-- single orphan amenity check). There is no single "complaints" row to flag,
++-- so resolution state is stored against the stable key the UI already builds
++-- for each card: `<submissionId>`, `session-<sessionId>` or `check-<checkId>`.
 +
-+-- ────────────────────────────────────────────────────────────────────────────
-+-- 1. Cleaning companies can read the owner groups they are affiliated with
-+-- ────────────────────────────────────────────────────────────────────────────
++CREATE TABLE IF NOT EXISTS public.complaint_resolutions (
++  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
++  property_id uuid NOT NULL REFERENCES public.properties(id) ON DELETE CASCADE,
++  complaint_key text NOT NULL,
++  resolution_note text,
++  resolved_by uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
++  resolved_at timestamptz NOT NULL DEFAULT now(),
++  UNIQUE (complaint_key)
++);
 +
-+DROP POLICY IF EXISTS "hr reads affiliated groups" ON public.owner_groups;
-+CREATE POLICY "hr reads affiliated groups" ON public.owner_groups FOR SELECT TO authenticated
-+  USING (public.is_hr_affiliated(id));
++CREATE INDEX IF NOT EXISTS complaint_resolutions_property_idx
++  ON public.complaint_resolutions (property_id);
 +
-+-- The complaints section reads guest data. Owners already had access through
-+-- `is_group_member`; affiliated cleaning companies did not, which would render
-+-- the section permanently empty for them.
++GRANT SELECT, INSERT, UPDATE, DELETE ON public.complaint_resolutions TO authenticated;
++GRANT ALL ON public.complaint_resolutions TO service_role;
 +
-+DROP POLICY IF EXISTS "hr reads room conditions" ON public.room_condition_submissions;
-+CREATE POLICY "hr reads room conditions" ON public.room_condition_submissions FOR SELECT TO authenticated
-+  USING (public.is_hr_affiliated(public.property_group(property_id)));
++ALTER TABLE public.complaint_resolutions ENABLE ROW LEVEL SECURITY;
 +
-+DROP POLICY IF EXISTS "hr reads room photos" ON public.room_condition_photos;
-+CREATE POLICY "hr reads room photos" ON public.room_condition_photos FOR SELECT TO authenticated
-+  USING (public.is_hr_affiliated(public.property_group(public.submission_property(submission_id))));
-+
-+DROP POLICY IF EXISTS "hr reads checks" ON public.amenity_checks;
-+CREATE POLICY "hr reads checks" ON public.amenity_checks FOR SELECT TO authenticated
-+  USING (public.is_hr_affiliated(public.property_group(property_id)));
-+
-+DROP POLICY IF EXISTS "hr reads amenities" ON public.amenity_definitions;
-+CREATE POLICY "hr reads amenities" ON public.amenity_definitions FOR SELECT TO authenticated
-+  USING (public.is_hr_affiliated(public.property_group(property_id)));
-+
-+DROP POLICY IF EXISTS "hr reads sessions" ON public.customer_sessions;
-+CREATE POLICY "hr reads sessions" ON public.customer_sessions FOR SELECT TO authenticated
-+  USING (public.is_hr_affiliated(public.property_group(property_id)));
-+
-+-- ────────────────────────────────────────────────────────────────────────────
-+-- 2. Notifications deep-link to the complaints section
-+-- ────────────────────────────────────────────────────────────────────────────
-+
-+CREATE OR REPLACE FUNCTION public.notification_target_url(p_type text, p_payload jsonb)
-+RETURNS text
-+LANGUAGE plpgsql
-+IMMUTABLE
-+SET search_path = public
-+AS $$
-+DECLARE
-+  v_property text := COALESCE(p_payload->>'propertyId', p_payload->>'property_id');
-+BEGIN
-+  IF p_payload ? 'url' THEN
-+    RETURN p_payload->>'url';
-+  END IF;
-+
-+  IF p_type IN ('special_request') THEN
-+    RETURN '/shop?section=requests' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
-+  ELSIF p_type IN ('payment_proof') THEN
-+    RETURN '/shop?section=shop' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
-+  -- Guest-reported problems all land in the reviews page complaints section.
-+  ELSIF p_type IN ('amenity_discrepancy', 'hygiene_complaint', 'low_rating') THEN
-+    RETURN '/reviews?section=complaints' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
-+  ELSIF p_type IN ('job_submitted') THEN
-+    RETURN '/cleaning?tab=jobs' || CASE WHEN v_property IS NOT NULL THEN '&property=' || v_property ELSE '' END;
-+  ELSIF p_type IN ('hr_request', 'hr_job_submitted', 'hr_job_reviewed') THEN
-+    RETURN '/inbox';
-+  ELSIF p_type IN ('job_assigned', 'job_reviewed') THEN
-+    RETURN '/jobs';
-+  ELSIF p_type IN ('task_assigned', 'task_submitted', 'task_approved') THEN
-+    RETURN '/tasks';
-+  ELSIF p_type IN ('review_received') THEN
-+    RETURN '/reviews';
-+  END IF;
-+
-+  RETURN NULL;
-+END;
-+$$;
-+
-+-- Re-point notifications that are still unread so existing badges land on the
-+-- new section instead of the cleaning tab.
-+UPDATE public.notifications
-+   SET target_url = public.notification_target_url(type, payload)
-+ WHERE read = false
-+   AND type = 'amenity_discrepancy';
-+
-+-- ────────────────────────────────────────────────────────────────────────────
-+-- 3. New notifications: hygiene complaints and low guest ratings
-+-- ────────────────────────────────────────────────────────────────────────────
-+
-+-- Fired when the guest submits the room-condition step. A submission counts as
-+-- a complaint when the guest wrote notes; a rating of 3 or less raises a
-+-- separate low-rating alert. Photos are inserted after the submission row, so
-+-- they are handled by their own trigger below.
-+CREATE OR REPLACE FUNCTION public.notify_room_condition_complaint()
-+RETURNS trigger
-+LANGUAGE plpgsql
-+SECURITY DEFINER
-+SET search_path = public
-+AS $$
-+DECLARE
-+  v_owner uuid;
-+BEGIN
-+  v_owner := public.group_owner_id(public.property_group(NEW.property_id));
-+  IF v_owner IS NULL THEN
-+    RETURN NEW;
-+  END IF;
-+
-+  IF NEW.notes IS NOT NULL AND btrim(NEW.notes) <> '' THEN
-+    PERFORM public.notify_user(
-+      v_owner,
-+      'hygiene_complaint',
-+      jsonb_build_object('propertyId', NEW.property_id, 'submissionId', NEW.id)
-+    );
-+  END IF;
-+
-+  IF NEW.overall_rating IS NOT NULL AND NEW.overall_rating <= 3 THEN
-+    PERFORM public.notify_user(
-+      v_owner,
-+      'low_rating',
-+      jsonb_build_object(
-+        'propertyId', NEW.property_id,
-+        'submissionId', NEW.id,
-+        'rating', NEW.overall_rating
-+      )
-+    );
-+  END IF;
-+
-+  RETURN NEW;
-+END;
-+$$;
-+
-+DROP TRIGGER IF EXISTS trg_notify_room_condition_complaint ON public.room_condition_submissions;
-+CREATE TRIGGER trg_notify_room_condition_complaint
-+  AFTER INSERT ON public.room_condition_submissions
-+  FOR EACH ROW EXECUTE FUNCTION public.notify_room_condition_complaint();
-+
-+-- Hygiene photos are inserted one row at a time. Only the first photo of a
-+-- submission raises a notification, so a five-photo complaint is one alert.
-+CREATE OR REPLACE FUNCTION public.notify_hygiene_photo()
-+RETURNS trigger
-+LANGUAGE plpgsql
-+SECURITY DEFINER
-+SET search_path = public
-+AS $$
-+DECLARE
-+  v_property uuid;
-+  v_owner uuid;
-+  v_existing int;
-+BEGIN
-+  SELECT count(*) INTO v_existing
-+    FROM public.room_condition_photos
-+   WHERE submission_id = NEW.submission_id
-+     AND id <> NEW.id;
-+  IF v_existing > 0 THEN
-+    RETURN NEW;
-+  END IF;
-+
-+  v_property := public.submission_property(NEW.submission_id);
-+  v_owner := public.group_owner_id(public.property_group(v_property));
-+  IF v_owner IS NULL THEN
-+    RETURN NEW;
-+  END IF;
-+
-+  PERFORM public.notify_user(
-+    v_owner,
-+    'hygiene_complaint',
-+    jsonb_build_object('propertyId', v_property, 'submissionId', NEW.submission_id)
++-- Only the group owner can resolve or reopen a complaint. `resolved_by` is
++-- pinned to the caller so a row can never be attributed to somebody else.
++DROP POLICY IF EXISTS "owner resolves complaints" ON public.complaint_resolutions;
++CREATE POLICY "owner resolves complaints" ON public.complaint_resolutions FOR ALL TO authenticated
++  USING (public.group_owner_id(public.property_group(property_id)) = auth.uid())
++  WITH CHECK (
++    public.group_owner_id(public.property_group(property_id)) = auth.uid()
++    AND resolved_by = auth.uid()
 +  );
-+  RETURN NEW;
-+END;
-+$$;
 +
-+DROP TRIGGER IF EXISTS trg_notify_hygiene_photo ON public.room_condition_photos;
-+CREATE TRIGGER trg_notify_hygiene_photo
-+  AFTER INSERT ON public.room_condition_photos
-+  FOR EACH ROW EXECUTE FUNCTION public.notify_hygiene_photo();
++-- Everyone who can already see the complaint can see that it was handled.
++DROP POLICY IF EXISTS "members read complaint resolutions" ON public.complaint_resolutions;
++CREATE POLICY "members read complaint resolutions" ON public.complaint_resolutions FOR SELECT TO authenticated
++  USING (public.is_group_member(public.property_group(property_id)));
 +
-+-- Guests can also leave a low rating on the cleaner directly.
-+CREATE OR REPLACE FUNCTION public.notify_low_cleaner_rating()
-+RETURNS trigger
-+LANGUAGE plpgsql
-+SECURITY DEFINER
-+SET search_path = public
-+AS $$
-+DECLARE
-+  v_owner uuid;
-+BEGIN
-+  IF NEW.rating > 3 THEN
-+    RETURN NEW;
-+  END IF;
++DROP POLICY IF EXISTS "hr reads complaint resolutions" ON public.complaint_resolutions;
++CREATE POLICY "hr reads complaint resolutions" ON public.complaint_resolutions FOR SELECT TO authenticated
++  USING (public.is_hr_affiliated(public.property_group(property_id)));
 +
-+  v_owner := public.group_owner_id(public.property_group(NEW.property_id));
-+  IF v_owner IS NULL THEN
-+    RETURN NEW;
-+  END IF;
-+
-+  PERFORM public.notify_user(
-+    v_owner,
-+    'low_rating',
-+    jsonb_build_object(
-+      'propertyId', NEW.property_id,
-+      'ratingId', NEW.id,
-+      'rating', NEW.rating,
-+      'cleanerUserId', NEW.cleaner_user_id
-+    )
-+  );
-+  RETURN NEW;
-+END;
-+$$;
-+
-+DROP TRIGGER IF EXISTS trg_notify_low_cleaner_rating ON public.cleaner_ratings;
-+CREATE TRIGGER trg_notify_low_cleaner_rating
-+  AFTER INSERT ON public.cleaner_ratings
-+  FOR EACH ROW EXECUTE FUNCTION public.notify_low_cleaner_rating();
-+
-+-- Realtime so the complaints section updates without a reload.
++-- Realtime so a resolution made in one tab updates the other.
 +DO $$
 +BEGIN
-+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.room_condition_photos; EXCEPTION WHEN duplicate_object THEN NULL; END;
-+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE public.amenity_checks; EXCEPTION WHEN duplicate_object THEN NULL; END;
++  BEGIN
++    ALTER PUBLICATION supabase_realtime ADD TABLE public.complaint_resolutions;
++  EXCEPTION WHEN duplicate_object THEN NULL;
++  END;
 +END $$;
-+
-+-- The original amenity-discrepancy trigger still INSERTed straight into
-+-- notifications, so those rows had a NULL target_url and the bell had nothing
-+-- to link to. Route it through notify_user (which fills target_url) and use
-+-- the camelCase payload key the rest of the app expects.
-+CREATE OR REPLACE FUNCTION public.notify_discrepancy()
-+RETURNS trigger
-+LANGUAGE plpgsql
-+SECURITY DEFINER
-+SET search_path = public
-+AS $$
-+DECLARE
-+  v_owner uuid;
-+BEGIN
-+  IF NOT NEW.is_discrepancy THEN
-+    RETURN NEW;
-+  END IF;
-+
-+  v_owner := public.group_owner_id(public.property_group(NEW.property_id));
-+  IF v_owner IS NULL THEN
-+    RETURN NEW;
-+  END IF;
-+
-+  PERFORM public.notify_user(
-+    v_owner,
-+    'amenity_discrepancy',
-+    jsonb_build_object(
-+      'checkId', NEW.id,
-+      'propertyId', NEW.property_id,
-+      'role', NEW.role
-+    )
-+  );
-+  RETURN NEW;
-+END;
-+$$;

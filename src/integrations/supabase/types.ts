@@ -296,6 +296,41 @@ export type Database = {
           },
         ]
       }
+      complaint_resolutions: {
+        Row: {
+          complaint_key: string
+          id: string
+          property_id: string
+          resolution_note: string | null
+          resolved_at: string
+          resolved_by: string
+        }
+        Insert: {
+          complaint_key: string
+          id?: string
+          property_id: string
+          resolution_note?: string | null
+          resolved_at?: string
+          resolved_by: string
+        }
+        Update: {
+          complaint_key?: string
+          id?: string
+          property_id?: string
+          resolution_note?: string | null
+          resolved_at?: string
+          resolved_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "complaint_resolutions_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cleaning_job_items: {
         Row: {
           cleaning_job_id: string

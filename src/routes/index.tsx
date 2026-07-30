@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -12,10 +12,12 @@ import {
   ChevronRight,
   Menu,
   X,
+  KeyRound,
 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -45,6 +47,16 @@ export const Route = createFileRoute("/")({
   }),
   component: Landing,
 });
+
+/** Anchor targets are fixed ids: deriving them from the translated label
+ *  produced hrefs like `#功能` that matched no section outside English. */
+const NAV_LINKS = [
+  { key: "landing.navFeatures" as const, href: "#features" },
+  { key: "landing.navHow" as const, href: "#how-it-works" },
+  { key: "landing.navPricing" as const, href: "#pricing" },
+  { key: "landing.navFaq" as const, href: "#faq" },
+  { key: "landing.navGuest" as const, href: "#guest" },
+];
 
 const FEATURES = [
   {
@@ -194,8 +206,18 @@ const FAQS = [
 
 function Landing() {
   const t = useT();
+  const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [stayCode, setStayCode] = useState("");
+
+  // The guest flow already exists at /g/$code; the landing page had no way in.
+  const openGuestPage = (event: React.FormEvent) => {
+    event.preventDefault();
+    const code = stayCode.trim();
+    if (!code) return;
+    navigate({ to: "/g/$code", params: { code }, search: {} });
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -204,13 +226,13 @@ function Landing() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <span className="font-display text-xl font-semibold">{t("app.name")}</span>
           <div className="hidden items-center gap-1 md:flex">
-            {(["landing.navFeatures", "landing.navHow", "landing.navPricing", "landing.navFaq"] as const).map((key) => (
+            {NAV_LINKS.map((item) => (
               <a
-                key={key}
-                href={`#${t(key).toLowerCase().replace(/\s+/g, "-")}`}
+                key={item.key}
+                href={item.href}
                 className="rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
-                {t(key)}
+                {t(item.key)}
               </a>
             ))}
           </div>
@@ -236,14 +258,14 @@ function Landing() {
         {mobileOpen && (
           <div className="border-t border-border px-4 pb-4 md:hidden">
             <div className="flex flex-col gap-1 pt-2">
-              {(["landing.navFeatures", "landing.navHow", "landing.navPricing", "landing.navFaq"] as const).map((key) => (
+              {NAV_LINKS.map((item) => (
                 <a
-                  key={key}
-                  href={`#${t(key).toLowerCase().replace(/\s+/g, "-")}`}
+                  key={item.key}
+                  href={item.href}
                   className="rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   onClick={() => setMobileOpen(false)}
                 >
-                  {t(key)}
+                  {t(item.key)}
                 </a>
               ))}
               <Link
@@ -444,6 +466,33 @@ function Landing() {
           </div>
         </section>
 
+        {/* ---- Guest entry ---- */}
+        <section id="guest" className="scroll-mt-20 border-b border-border bg-card py-20 md:py-28">
+          <div className="mx-auto max-w-3xl px-6 text-center">
+            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <KeyRound className="h-6 w-6" aria-hidden="true" />
+            </span>
+            <h2 className="mt-5 text-3xl font-display md:text-4xl">{t("landing.guestTitle")}</h2>
+            <p className="mx-auto mt-3 max-w-xl text-muted-foreground">{t("landing.guestBody")}</p>
+            <form
+              onSubmit={openGuestPage}
+              className="mx-auto mt-8 flex max-w-md flex-col gap-3 sm:flex-row"
+            >
+              <Input
+                value={stayCode}
+                onChange={(e) => setStayCode(e.target.value)}
+                placeholder={t("landing.guestCode")}
+                aria-label={t("landing.guestCode")}
+                autoComplete="off"
+              />
+              <Button type="submit" disabled={!stayCode.trim()}>
+                {t("landing.guestCta")}
+                <ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" />
+              </Button>
+            </form>
+          </div>
+        </section>
+
         {/* ---- FAQ ---- */}
         <section id="faq" className="scroll-mt-20 border-b border-border py-20 md:py-28">
           <div className="mx-auto max-w-3xl px-6">
@@ -520,6 +569,7 @@ function Landing() {
                 <li><a href="#features" className="transition-colors hover:text-foreground">{t("landing.featuresLabel")}</a></li>
                 <li><a href="#pricing" className="transition-colors hover:text-foreground">{t("landing.pricingLabel")}</a></li>
                 <li><a href="#faq" className="transition-colors hover:text-foreground">{t("landing.faqLabel")}</a></li>
+                <li><a href="#guest" className="transition-colors hover:text-foreground">{t("landing.navGuest")}</a></li>
               </ul>
             </div>
             <div>
