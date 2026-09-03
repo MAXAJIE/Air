@@ -2,6 +2,7 @@ import { createFileRoute, Outlet, useRouterState } from "@tanstack/react-router"
 import { redirect } from "@tanstack/react-router";
 
 import { AppShell } from "@/components/app-shell";
+import { ConnectionStatus } from "@/components/connection-status";
 import { ActiveGroupProvider } from "@/hooks/use-app";
 import { useIdleLogout } from "@/hooks/use-idle-logout";
 import { supabase } from "@/integrations/supabase/client";
@@ -33,13 +34,20 @@ function AuthenticatedLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   useIdleLogout();
   // Onboarding screens are full-bleed: no rail, no group switcher.
-  if (pathname.startsWith("/onboarding")) return <Outlet />;
+  if (pathname.startsWith("/onboarding"))
+    return (
+      <>
+        <Outlet />
+        <ConnectionStatus />
+      </>
+    );
 
   return (
     <ActiveGroupProvider>
       <AppShell>
         <Outlet />
       </AppShell>
+      <ConnectionStatus />
     </ActiveGroupProvider>
   );
 }

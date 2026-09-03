@@ -14,10 +14,14 @@ export const GRID_COLS: Record<CardSize, string> = {
   lg: "grid gap-5 lg:grid-cols-2",
 };
 
+/**
+ * Card covers keep the 3:2 shape the cropper uses, so an image positioned in
+ * the crop dialog is shown whole instead of being re-cropped by the card.
+ */
 export const COVER_HEIGHT: Record<CardSize, string> = {
-  sm: "h-24",
-  md: "h-36",
-  lg: "h-56",
+  sm: "aspect-[3/2]",
+  md: "aspect-[3/2]",
+  lg: "aspect-[3/2]",
 };
 
 /** Grid/list switch plus a card-density stepper, shared by every catalog surface. */

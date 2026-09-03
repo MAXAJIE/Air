@@ -28,6 +28,30 @@ const en = {
   "nav.reviews": "Reviews",
   "nav.activity": "Activity",
 
+  "color.title": "Colour",
+  "color.custom": "Custom colour",
+  "color.preview": "Preview",
+  "color.apply": "Apply",
+
+  "prop.statusSettings": "Status settings",
+  "prop.settings": "Settings",
+
+  "clean.startAt": "Start time",
+  "clean.dueAt": "Due time",
+  "clean.readyTitle": "Before you schedule",
+
+  "tpl.chores": "Chores",
+  "tpl.saveChore": "Save chore",
+
+  "net.offline": "Offline — reconnecting",
+
+  "onb.nameTitle": "Tell us who you are",
+  "onb.nameBody": "Your name is what teammates and guests see.",
+  "onb.displayName": "Full name",
+  "onb.phone": "Phone (optional)",
+  "onb.continue": "Continue",
+  "onb.nameRequired": "Enter your name to continue",
+
   "task.photoRequired": "Photo required",
   "task.photoDone": "Photo added",
   "task.photoBlocking": "{n} required photo(s) missing",
@@ -603,6 +627,7 @@ const en = {
   "prop.coverAdd": "Add a cover photo",
   "prop.location": "Location",
   "prop.edit": "Edit property",
+  "prop.settings": "Status colours & details",
 
   "people.owners": "Owners",
   "people.cleaners": "Cleaners",

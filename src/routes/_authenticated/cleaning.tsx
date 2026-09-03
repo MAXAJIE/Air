@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Building2, Camera, CheckCircle2, Eye, Package, Pencil, Plus, Sparkles, Trash2, UserRound } from "lucide-react";
+import { Building2, Camera, Check, CheckCircle2, Circle, Eye, Package, Pencil, Plus, Sparkles, Trash2, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -139,6 +139,7 @@ function JobsPanel() {
   const [assignee, setAssignee] = useState("");
   const [hrCompanyId, setHrCompanyId] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
+  const [dueAt, setDueAt] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editingJob, setEditingJob] = useState<JobRow | null>(null);
   const [previewJob, setPreviewJob] = useState<JobRow | null>(null);
@@ -231,13 +232,18 @@ function JobsPanel() {
     },
   });
 
-  // A clean is only schedulable once time, cleaner, property and template are all set.
-  const missing: string[] = [];
-  if (!propertyId) missing.push(t("clean.property"));
-  if (!templateId) missing.push(t("clean.template"));
-  if (assignType === "direct" && !assignee) missing.push(t("clean.assignDirect"));
-  if (assignType === "hr_company" && !hrCompanyId) missing.push(t("clean.assignHr"));
-  if (!scheduledAt) missing.push(t("clean.scheduledAt"));
+  // A clean is only schedulable once time, cleaner, property and template are
+  // all set. Kept as a checklist so the user sees what is still missing.
+  const requirements: { label: string; ok: boolean }[] = [
+    { label: t("clean.property"), ok: !!propertyId },
+    { label: t("clean.template"), ok: !!templateId },
+    {
+      label: assignType === "direct" ? t("clean.assignDirect") : t("clean.assignHr"),
+      ok: assignType === "direct" ? !!assignee : !!hrCompanyId,
+    },
+    { label: t("clean.startAt"), ok: !!scheduledAt },
+  ];
+  const missing = requirements.filter((r) => !r.ok).map((r) => r.label);
   const canCreate = missing.length === 0;
 
   const createJob = useMutation({
@@ -248,6 +254,7 @@ function JobsPanel() {
         property_id: propertyId,
         template_id: templateId,
         scheduled_at: new Date(scheduledAt).toISOString(),
+        due_at: dueAt ? new Date(dueAt).toISOString() : null,
         status: "pending",
       };
       if (assignType === "direct") {
@@ -457,20 +464,46 @@ function JobsPanel() {
             )}
           </div>
         )}
-        <div className="space-y-2">
-          <Label htmlFor="sched">{t("clean.scheduledAt")}</Label>
-          <Input
-            id="sched"
-            type="datetime-local"
-            value={scheduledAt}
-            onChange={(e) => setScheduledAt(e.target.value)}
-          />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="sched">{t("clean.startAt")}</Label>
+            <Input
+              id="sched"
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={(e) => setScheduledAt(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="sched-due">{t("clean.dueAt")}</Label>
+            <Input
+              id="sched-due"
+              type="datetime-local"
+              value={dueAt}
+              min={scheduledAt || undefined}
+              onChange={(e) => setDueAt(e.target.value)}
+            />
+          </div>
         </div>
-        {!canCreate && (
-          <p className="text-xs text-muted-foreground">
-            {t("clean.jobIncomplete")} {missing.join(", ")}
-          </p>
-        )}
+
+        {/* Password-rule style checklist: one requirement per line, so it is
+            obvious what is still missing. */}
+        <ul className="space-y-1.5 text-xs">
+          <li className="font-medium text-muted-foreground">{t("clean.readyTitle")}</li>
+          {requirements.map((r) => (
+            <li
+              key={r.label}
+              className={`flex items-center gap-2 ${r.ok ? "text-muted-foreground" : "text-destructive"}`}
+            >
+              {r.ok ? (
+                <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              ) : (
+                <Circle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              )}
+              {r.label}
+            </li>
+          ))}
+        </ul>
         <Button
           className="w-full"
           disabled={!canCreate || createJob.isPending}
@@ -1513,92 +1546,51 @@ function TemplateDialog({
             <Input id="tpl-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
 
+          {/* Chores are added one at a time: fill the small composer, press
+              "Save chore", and it drops into the compact list above. */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label>{t("tpl.items")}</Label>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setItems((prev) => [
-                    ...prev,
-                    { key: crypto.randomUUID(), description: "", notes: "", requires_photo: false },
-                  ])
-                }
-              >
-                <Plus className="h-4 w-4" aria-hidden="true" />
-                {t("tpl.addItem")}
-              </Button>
-            </div>
+            <Label>
+              {t("tpl.chores")} ({items.length})
+            </Label>
 
-            {items.length === 0 && (
-              <p className="rounded-md border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
-                {t("tpl.empty")}
-              </p>
-            )}
-
-            {items.map((item, index) => (
-              <div key={item.key} className="space-y-2 rounded-lg border border-border p-3">
-                <div className="flex items-start gap-2">
-                  <span className="mt-2 w-5 shrink-0 text-xs text-muted-foreground">{index + 1}.</span>
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <Input
-                      value={item.description}
-                      placeholder={t("tpl.itemLabel")}
-                      onChange={(e) =>
-                        setItems((prev) =>
-                          prev.map((row) =>
-                            row.key === item.key ? { ...row, description: e.target.value } : row,
-                          ),
-                        )
-                      }
-                    />
-                    <Textarea
-                      rows={2}
-                      value={item.notes}
-                      placeholder={t("tpl.tip")}
-                      onChange={(e) =>
-                        setItems((prev) =>
-                          prev.map((row) => (row.key === item.key ? { ...row, notes: e.target.value } : row)),
-                        )
-                      }
-                    />
-                    <p className="text-xs text-muted-foreground">{t("tpl.tipHint")}</p>
-                    <button
-                      type="button"
-                      aria-pressed={item.requires_photo}
-                      onClick={() =>
-                        setItems((prev) =>
-                          prev.map((row) =>
-                            row.key === item.key ? { ...row, requires_photo: !row.requires_photo } : row,
-                          ),
-                        )
-                      }
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors",
-                        item.requires_photo
-                          ? "border-transparent bg-primary text-primary-foreground"
-                          : "border-border text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      <Camera className="h-3.5 w-3.5" aria-hidden="true" />
-                      {t("tpl.photoShort")}
-                    </button>
+            <ol className="space-y-1.5">
+              {items.map((item, index) => (
+                <li
+                  key={item.key}
+                  className="flex items-start gap-2 rounded-md border border-border px-3 py-2"
+                >
+                  <span className="mt-0.5 text-xs text-muted-foreground">{index + 1}.</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm">{item.description}</p>
+                    {item.notes && (
+                      <p className="truncate text-xs text-muted-foreground">{item.notes}</p>
+                    )}
                   </div>
+                  {item.requires_photo && (
+                    <Camera className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                  )}
                   <Button
                     type="button"
                     size="icon"
                     variant="ghost"
-                    className="h-8 w-8 shrink-0"
+                    className="h-6 w-6 shrink-0"
                     aria-label={t("common.delete")}
                     onClick={() => setItems((prev) => prev.filter((row) => row.key !== item.key))}
                   >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                   </Button>
-                </div>
-              </div>
-            ))}
+                </li>
+              ))}
+              {items.length === 0 && (
+                <li className="rounded-md border border-dashed border-border py-4 text-center text-sm text-muted-foreground">
+                  {t("tpl.empty")}
+                </li>
+              )}
+            </ol>
+
+            <ChoreComposer
+              onAdd={(chore) => setItems((prev) => [...prev, { key: crypto.randomUUID(), ...chore }])}
+            />
           </div>
         </div>
         <DialogFooter>
@@ -1611,6 +1603,68 @@ function TemplateDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Single-chore composer: one field set, one save button, then it resets. */
+function ChoreComposer({
+  onAdd,
+}: {
+  onAdd: (chore: { description: string; notes: string; requires_photo: boolean }) => void;
+}) {
+  const t = useT();
+  const [description, setDescription] = useState("");
+  const [notes, setNotes] = useState("");
+  const [requiresPhoto, setRequiresPhoto] = useState(false);
+
+  function add() {
+    if (!description.trim()) return;
+    onAdd({ description: description.trim(), notes: notes.trim(), requires_photo: requiresPhoto });
+    setDescription("");
+    setNotes("");
+    setRequiresPhoto(false);
+  }
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+      <Input
+        value={description}
+        placeholder={t("tpl.itemLabel")}
+        onChange={(e) => setDescription(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            add();
+          }
+        }}
+      />
+      <Textarea
+        rows={2}
+        value={notes}
+        placeholder={t("tpl.tip")}
+        onChange={(e) => setNotes(e.target.value)}
+      />
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          aria-pressed={requiresPhoto}
+          onClick={() => setRequiresPhoto((v) => !v)}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors",
+            requiresPhoto
+              ? "border-transparent bg-primary text-primary-foreground"
+              : "border-border text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Camera className="h-3.5 w-3.5" aria-hidden="true" />
+          {t("tpl.photoShort")}
+        </button>
+        <Button type="button" size="sm" disabled={!description.trim()} onClick={add}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {t("tpl.saveChore")}
+        </Button>
+      </div>
+    </div>
   );
 }
 

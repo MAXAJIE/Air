@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ExternalLink, Filter, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -66,6 +66,7 @@ type EditState = {
 function PropertiesPage() {
   const t = useT();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { groupId } = useActiveGroup();
   const prefs = useViewPrefs("properties");
   const initial = prefs.read();
@@ -226,9 +227,9 @@ function PropertiesPage() {
       <Button
         variant="ghost"
         size="icon"
-        aria-label={t("prop.edit")}
-        title={t("prop.edit")}
-        onClick={() => startEdit(p)}
+        aria-label={t("prop.settings")}
+        title={t("prop.settings")}
+        onClick={() => navigate({ to: "/properties/$propertyId", params: { propertyId: p.id } })}
       >
         <Pencil className="h-4 w-4" aria-hidden="true" />
       </Button>
@@ -314,10 +315,10 @@ function PropertiesPage() {
         <ul className="surface divide-y divide-border">
           {filtered.map((p, index) => (
             <li key={p.id} className="flex items-center gap-1 pr-2 animate-card-enter transition-colors hover:bg-accent/40" style={{ animationDelay: `${index * 30}ms` }}>
-              <Link
-                to="/properties/$propertyId"
-                params={{ propertyId: p.id }}
-                className="flex min-w-0 flex-1 items-center gap-3 p-3"
+              <button
+                type="button"
+                onClick={() => startEdit(p)}
+                className="flex min-w-0 flex-1 items-center gap-3 p-3 text-left"
               >
                 {p.photo_path ? (
                   <SignedPhoto path={p.photo_path} alt={p.name} className="h-12 w-16 shrink-0 object-cover" />
@@ -339,7 +340,7 @@ function PropertiesPage() {
                 <span className="hidden shrink-0 font-mono text-xs text-muted-foreground md:inline">
                   {p.access_code}
                 </span>
-              </Link>
+              </button>
               <RowActions p={p} />
             </li>
           ))}
@@ -352,7 +353,11 @@ function PropertiesPage() {
               className="surface overflow-hidden animate-card-enter transition-all hover:shadow-[var(--shadow-lift)] hover:-translate-y-0.5"
               style={{ animationDelay: `${index * 40}ms` }}
             >
-              <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="relative block">
+              <button
+                type="button"
+                onClick={() => startEdit(p)}
+                className="relative block w-full text-left"
+              >
                 <span
                   className={`absolute left-2 top-2 z-10 ${statusChipClass(statusColor(p.status_id))}`}
                   style={statusChipStyle(statusColor(p.status_id))}
@@ -379,7 +384,7 @@ function PropertiesPage() {
                     </div>
                   )}
                 </div>
-              </Link>
+              </button>
               <div className="flex items-center justify-end border-t border-border px-2 py-1">
                 <RowActions p={p} />
               </div>

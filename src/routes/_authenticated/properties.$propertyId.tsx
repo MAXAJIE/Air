@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Trash2, Copy, ExternalLink, Plus } from "lucide-react";
+import { ArrowLeft, Trash2, Copy, ExternalLink, Plus, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { ListSkeleton, PageHeader } from "@/components/app-shell";
+import { ColorPickerPopover } from "@/components/color-picker-popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,7 +20,7 @@ import {
 import { useActiveGroup, useProfile } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
-import { STATUS_COLORS, statusChipClass, statusDotClass, statusDotStyle, isHexColor } from "@/lib/status-colors";
+import { statusChipClass } from "@/lib/status-colors";
 
 export const Route = createFileRoute("/_authenticated/properties/$propertyId")({
   head: () => ({
@@ -82,6 +84,7 @@ function PropertyDetailView() {
   const navigate = useNavigate();
   const { groupId } = useActiveGroup();
   const [statusLabel, setStatusLabel] = useState("");
+  const [statusSettings, setStatusSettings] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState("");
   const [editAddress, setEditAddress] = useState("");
@@ -354,69 +357,64 @@ function PropertyDetailView() {
             </Button>
           </div>
 
+          {/* Labels stay one-tap editable; colour and clean-up live behind the
+              gear so renaming a status is not buried in swatches. */}
           <ul className="space-y-2">
             {(statusesQ.data ?? []).map((s) => (
-              <li key={s.id} className="flex flex-wrap items-center justify-between gap-2">
+              <li key={s.id} className="flex items-center gap-2">
                 <Input
                   defaultValue={s.label}
-                  className="h-8 max-w-full sm:max-w-[10rem]"
+                  className="h-8 flex-1"
                   onBlur={(e) => {
                     const v = e.currentTarget.value.trim();
                     if (v && v !== s.label) renameStatus.mutate({ id: s.id, label: v });
                   }}
                 />
-                <span className="flex items-center gap-1">
-                  {STATUS_COLORS.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      aria-label={c}
-                      title={c}
-                      onClick={() => setStatusColor.mutate({ id: s.id, color: c })}
-                      className={`h-4 w-4 rounded-full ${statusDotClass(c)} ${
-                        s.color === c ? "ring-2 ring-ring" : ""
-                      }`}
-                    />
-                  ))}
-                  <label
-                    className={`relative inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-full border border-border ${
-                      isHexColor(s.color) ? "ring-2 ring-ring" : ""
-                    }`}
-                    title="Custom colour"
-                    style={isHexColor(s.color) ? statusDotStyle(s.color) : undefined}
-                  >
-                    {!isHexColor(s.color) ? (
-                      <span
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-0 rounded-full"
-                        style={{
-                          background:
-                            "conic-gradient(#ef4444,#f59e0b,#eab308,#22c55e,#06b6d4,#3b82f6,#8b5cf6,#ec4899,#ef4444)",
-                        }}
-                      />
-                    ) : null}
-                    <input
-                      type="color"
-                      className="h-6 w-6 cursor-pointer opacity-0"
-                      value={isHexColor(s.color) ? s.color! : "#3b82f6"}
-                      onChange={(e) => setStatusColor.mutate({ id: s.id, color: e.target.value })}
-                      aria-label="Custom colour"
-                    />
-                  </label>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={t("common.delete")}
-                    onClick={() => {
-                      if (window.confirm(t("task.deleteConfirm"))) deleteStatus.mutate(s.id);
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label={t("prop.statusSettings")}
+                  onClick={() => setStatusSettings(s.id)}
+                >
+                  <Settings2 className="h-4 w-4" aria-hidden="true" />
+                </Button>
               </li>
             ))}
           </ul>
+
+          {(statusesQ.data ?? [])
+            .filter((s) => s.id === statusSettings)
+            .map((s) => (
+              <Dialog key={s.id} open onOpenChange={() => setStatusSettings(null)}>
+                <DialogContent className="sm:max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>{s.label}</DialogTitle>
+                  </DialogHeader>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm text-muted-foreground">{t("color.title")}</span>
+                    <ColorPickerPopover
+                      value={s.color}
+                      label={t("color.title")}
+                      onApply={(color) => setStatusColor.mutate({ id: s.id, color })}
+                    />
+                  </div>
+                  <Button
+                    variant="ghost"
+                    className="justify-start text-destructive"
+                    onClick={() => {
+                      if (!window.confirm(t("task.deleteConfirm"))) return;
+                      deleteStatus.mutate(s.id);
+                      setStatusSettings(null);
+                    }}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
+                    {t("common.delete")}
+                  </Button>
+                </DialogContent>
+              </Dialog>
+            ))}
 
           <div className="space-y-2">
             <Label>{t("prop.defaultTemplate")}</Label>

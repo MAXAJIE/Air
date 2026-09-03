@@ -6,6 +6,8 @@ import { toast } from "sonner";
 
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,6 +55,26 @@ function RolePage() {
   const { next } = Route.useSearch();
   const [selected, setSelected] = useState<AppRole | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // New accounts introduce themselves before picking a role.
+  const [displayName, setDisplayName] = useState("");
+  const [named, setNamed] = useState(false);
+
+  const saveName = useMutation({
+    mutationFn: async (name: string) => {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ display_name: name })
+        .eq("user_id", user!.id);
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+      setNamed(true);
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : t("common.error")),
+  });
+
+  const needsName = !named && !profile?.display_name;
 
 
   const save = useMutation({
@@ -84,6 +106,10 @@ function RolePage() {
   });
 
   useEffect(() => {
+    if (profile?.display_name) setDisplayName((v) => v || profile.display_name!);
+  }, [profile?.display_name]);
+
+  useEffect(() => {
     if (!isLoading && profile?.primary_role) navigate({ to: "/dashboard", replace: true });
   }, [isLoading, profile?.primary_role, navigate]);
 
@@ -96,6 +122,29 @@ function RolePage() {
       </header>
 
       <main className="mx-auto w-full max-w-5xl px-6 pb-16">
+        {needsName ? (
+          <div className="max-w-md space-y-4">
+            <h1 className="text-3xl">{t("onb.nameTitle")}</h1>
+            <p className="text-sm text-muted-foreground">{t("onb.nameBody")}</p>
+            <div className="space-y-2">
+              <Label htmlFor="display-name">{t("onb.displayName")}</Label>
+              <Input
+                id="display-name"
+                value={displayName}
+                autoComplete="name"
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+            </div>
+            <Button
+              type="button"
+              disabled={!displayName.trim() || saveName.isPending}
+              onClick={() => saveName.mutate(displayName.trim())}
+            >
+              {t("onb.continue")}
+            </Button>
+          </div>
+        ) : (
+          <>
         <h1 className="text-3xl">{t("role.title")}</h1>
         <p className="mt-2 text-sm text-muted-foreground">{t("role.body")}</p>
 
@@ -147,7 +196,8 @@ function RolePage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-
+          </>
+        )}
       </main>
     </div>
   );

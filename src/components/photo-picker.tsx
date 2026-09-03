@@ -51,14 +51,16 @@ export function PhotoPicker({
 
   return (
     <div className={cn("space-y-2", className)}>
-      <div className="relative">
+      {/* The preview box uses the same ratio as the cropper, so the saved crop
+          is displayed exactly as it was positioned. */}
+      <div className="relative w-full" style={{ aspectRatio: String(aspect) }}>
         {value ? (
-          <SignedPhoto path={value} alt={label} className="h-40 w-full object-cover" />
+          <SignedPhoto path={value} alt={label} className="h-full w-full object-cover" />
         ) : (
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="flex h-40 w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/40 text-sm text-muted-foreground transition-colors hover:bg-muted"
+            className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/40 text-sm text-muted-foreground transition-colors hover:bg-muted"
           >
             {upload.isPending ? (
               <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />

@@ -13,15 +13,17 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { useT } from "@/i18n";
 
-const FRAME_W = 320; // on-screen editor width in px
 const OUTPUT_W = 1280; // exported width in px
 
 type Loaded = { src: string; image: HTMLImageElement };
 
 /**
- * Rectangular crop dialog used by every non-avatar image field. The frame has
- * the same aspect ratio as the place the image will be displayed, so what the
- * user positions here is exactly what the app will show.
+ * Rectangular crop dialog used by every non-avatar image field.
+ *
+ * The frame is fluid (it keeps `aspect` through CSS `aspect-ratio`) and the
+ * picture is positioned in percentages of the frame, so what the user sees
+ * here is exactly what gets exported — the old fixed 320px frame drifted from
+ * the real frame width and the saved crop no longer fitted the display area.
  */
 export function ImageCropDialog({
   file,
@@ -41,15 +43,28 @@ export function ImageCropDialog({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [frameW, setFrameW] = useState(320);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
 
-  const frameW = FRAME_W;
-  const frameH = Math.round(FRAME_W / aspect);
+  const frameH = frameW / aspect;
 
   const reset = useCallback(() => {
     setZoom(1);
     setOffset({ x: 0, y: 0 });
   }, []);
+
+  // Track the real on-screen frame width so the maths always matches the pixels.
+  useEffect(() => {
+    const node = frameRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      if (width > 0) setFrameW(width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [loaded]);
 
   useEffect(() => {
     if (!file) {
@@ -88,6 +103,10 @@ export function ImageCropDialog({
   };
   const safeOffset = clamp(offset);
 
+  // Top-left of the picture, expressed inside the frame.
+  const left = (frameW - drawW) / 2 + safeOffset.x;
+  const top = (frameH - drawH) / 2 + safeOffset.y;
+
   async function confirm() {
     if (!loaded) return;
     const outW = OUTPUT_W;
@@ -97,14 +116,11 @@ export function ImageCropDialog({
     canvas.height = outH;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const ratio = outW / frameW;
-    ctx.drawImage(
-      loaded.image,
-      (frameW / 2 - drawW / 2 + safeOffset.x) * ratio,
-      (frameH / 2 - drawH / 2 + safeOffset.y) * ratio,
-      drawW * ratio,
-      drawH * ratio,
-    );
+    // One single scale factor keeps the export identical to the preview.
+    const k = outW / frameW;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, outW, outH);
+    ctx.drawImage(loaded.image, left * k, top * k, drawW * k, drawH * k);
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob((b) => resolve(b), "image/jpeg", 0.9),
     );
@@ -124,8 +140,9 @@ export function ImageCropDialog({
         </DialogHeader>
 
         <div
-          className="relative mx-auto touch-none select-none overflow-hidden rounded-lg bg-muted"
-          style={{ width: frameW, height: frameH }}
+          ref={frameRef}
+          className="relative mx-auto w-full max-w-[320px] touch-none select-none overflow-hidden rounded-lg bg-muted"
+          style={{ aspectRatio: String(aspect) }}
           onPointerDown={(e) => {
             dragRef.current = { x: e.clientX - safeOffset.x, y: e.clientY - safeOffset.y };
             (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -143,11 +160,12 @@ export function ImageCropDialog({
               src={loaded.src}
               alt=""
               draggable={false}
-              className="pointer-events-none absolute left-1/2 top-1/2 max-w-none"
+              className="pointer-events-none absolute max-w-none"
               style={{
-                width: drawW,
-                height: drawH,
-                transform: `translate(calc(-50% + ${safeOffset.x}px), calc(-50% + ${safeOffset.y}px))`,
+                width: `${(drawW / frameW) * 100}%`,
+                height: `${(drawH / frameH) * 100}%`,
+                left: `${(left / frameW) * 100}%`,
+                top: `${(top / frameH) * 100}%`,
               }}
             />
           )}

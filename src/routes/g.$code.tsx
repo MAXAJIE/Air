@@ -279,7 +279,8 @@ function GuestByCodePage() {
         setView("expired");
       } else {
         setView("error");
-        setErrorMessage(t("common.error"));
+        // Show what actually failed instead of a dead end the guest cannot act on.
+        setErrorMessage(msg || t("common.error"));
       }
       return;
     }
@@ -294,7 +295,7 @@ function GuestByCodePage() {
         setView("expired");
       } else {
         setView("error");
-        setErrorMessage(t("common.error"));
+        setErrorMessage(msg || t("common.error"));
       }
       return;
     }
@@ -356,6 +357,7 @@ function GuestByCodePage() {
               setErrorMessage("");
               setView("loading");
               void propertyQ.refetch();
+              void sessionQ.refetch();
               void contextQ.refetch();
             }}
           >

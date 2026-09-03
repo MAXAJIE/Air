@@ -21,17 +21,19 @@ export type PlaceValue = {
 };
 
 /** Reads GPS without ever throwing — returns null whenever the browser blocks it. */
-async function getBrowserPosition(): Promise<{ lat: number; lng: number } | null> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) return null;
+
+type Coords = { lat: number; lng: number };
+
+function requestPosition(options: PositionOptions): Promise<Coords | null> {
   return new Promise((resolve) => {
     let settled = false;
-    const done = (value: { lat: number; lng: number } | null) => {
+    const done = (value: Coords | null) => {
       if (settled) return;
       settled = true;
       resolve(value);
     };
     // Some embedded frames never call either callback, so cap the wait ourselves.
-    const timer = setTimeout(() => done(null), 12000);
+    const timer = setTimeout(() => done(null), (options.timeout ?? 10000) + 2000);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         clearTimeout(timer);
@@ -41,9 +43,28 @@ async function getBrowserPosition(): Promise<{ lat: number; lng: number } | null
         clearTimeout(timer);
         done(null);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+      options,
     );
   });
+}
+
+/**
+ * Ask the browser for a fix, then ask again without high accuracy.
+ *
+ * The permission prompt is often answered *after* the first call already
+ * failed, and the cached error made every later click look like it aborted
+ * instantly. The retry uses `maximumAge: 0` so a freshly granted permission is
+ * actually used instead of the stale denial.
+ */
+async function getBrowserPosition(): Promise<Coords | null> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) return null;
+  const first = await requestPosition({
+    enableHighAccuracy: true,
+    timeout: 10000,
+    maximumAge: 60000,
+  });
+  if (first) return first;
+  return requestPosition({ enableHighAccuracy: false, timeout: 15000, maximumAge: 0 });
 }
 
 /** Address entry that always resolves to real coordinates — typo-proof by design. */
@@ -77,7 +98,7 @@ export function AddressPicker({
 
       // GPS blocked (denied, embedded frame, no hardware): fall back to a coarse IP fix.
       if (!position) {
-        const fallback = await approximateLocation();
+        const fallback = await approximateLocation().catch(() => ({ result: null }));
         if (!fallback.result) {
           throw new Error(
             "Location is turned off for this site. Allow location access in your browser, or type the address instead.",
@@ -86,20 +107,19 @@ export function AddressPicker({
         return { result: fallback.result, approximate: true };
       }
 
+      // Coordinates are already good enough to save; a failing reverse lookup
+      // must never throw away a successful GPS read.
+      const coordsOnly: GeoResult = {
+        id: "pin",
+        label: "Pinned location",
+        address: `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`,
+        lat: position.lat,
+        lng: position.lng,
+      };
       const response = await reverseGeocode({
         data: { lat: position.lat, lng: position.lng },
-      });
-      return {
-        result:
-          response.result ?? {
-            id: "pin",
-            label: "Pinned location",
-            address: `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`,
-            lat: position.lat,
-            lng: position.lng,
-          },
-        approximate: false,
-      };
+      }).catch(() => ({ result: null }));
+      return { result: response.result ?? coordsOnly, approximate: false };
     },
     onSuccess: ({ result, approximate }) => {
       pick(result);
