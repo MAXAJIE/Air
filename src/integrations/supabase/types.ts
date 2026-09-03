@@ -340,6 +340,7 @@ export type Database = {
           description: string
           id: string
           is_checked: boolean
+          notes: string | null
           photo_url: string | null
           requires_photo: boolean
           sort_order: number
@@ -349,6 +350,7 @@ export type Database = {
           description: string
           id?: string
           is_checked?: boolean
+          notes?: string | null
           photo_url?: string | null
           requires_photo?: boolean
           sort_order?: number
@@ -358,6 +360,7 @@ export type Database = {
           description?: string
           id?: string
           is_checked?: boolean
+          notes?: string | null
           photo_url?: string | null
           requires_photo?: boolean
           sort_order?: number
@@ -1289,6 +1292,7 @@ export type Database = {
           proof_photo_path: string | null
           property_id: string | null
           source: string
+          start_at: string | null
           status: Database["public"]["Enums"]["task_status"]
           title: string
         }
@@ -1305,6 +1309,7 @@ export type Database = {
           proof_photo_path?: string | null
           property_id?: string | null
           source?: string
+          start_at?: string | null
           status?: Database["public"]["Enums"]["task_status"]
           title: string
         }
@@ -1320,6 +1325,7 @@ export type Database = {
           owner_group_id?: string | null
           proof_photo_path?: string | null
           property_id?: string | null
+          start_at?: string | null
           source?: string
           status?: Database["public"]["Enums"]["task_status"]
           title?: string

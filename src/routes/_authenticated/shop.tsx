@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, CheckCircle2, Pencil, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -137,6 +137,17 @@ function OrdersPanel() {
   const t = useT();
   const qc = useQueryClient();
   const { groupId } = useActiveGroup();
+  const prefs = useViewPrefs("shop-orders");
+  const [view, setView] = useState<ViewMode>("grid");
+  const [size, setSize] = useState<CardSize>("md");
+  const [openOrderId, setOpenOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const saved = prefs.read();
+    setView(saved.view);
+    setSize(saved.size);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const propsQ = useQuery({
     queryKey: ["properties", groupId],
@@ -222,77 +233,125 @@ function OrdersPanel() {
 
   if (ordersQ.isLoading) return <CardGridSkeleton count={3} />;
 
+  const orders = ordersQ.data ?? [];
+  const propertyName = (id: string) => propsQ.data?.find((p) => p.id === id)?.name ?? "—";
+  const detail = orders.find((o) => o.id === openOrderId) ?? null;
+
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {(ordersQ.data ?? []).map((o, index) => (
-        <article key={o.id} className="surface space-y-3 p-5 animate-card-enter transition-all duration-200 hover:shadow-[var(--shadow-lift)]" style={{ animationDelay: `${index * 40}ms` }}>
-          <div className="flex items-start justify-between gap-2">
-            <p className="min-w-0 truncate font-medium">
-              {propsQ.data?.find((p) => p.id === o.property_id)?.name ?? "—"}
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg">{t("shop.orders")}</h2>
+        <ViewToggle
+          view={view}
+          size={size}
+          onView={(v) => {
+            setView(v);
+            prefs.write({ view: v, size });
+          }}
+          onSize={(sz) => {
+            setSize(sz);
+            prefs.write({ view, size: sz });
+          }}
+        />
+      </div>
+
+      {/* The payment picture is detail, not a headline: the board stays a
+          scannable list of room + state, and the proof opens on demand. */}
+      <div className={view === "grid" ? GRID_COLS[size] : "space-y-2"}>
+        {orders.map((o, index) => (
+          <article
+            key={o.id}
+            className="surface flex flex-col gap-3 p-4 animate-card-enter transition-all duration-200 hover:shadow-[var(--shadow-lift)]"
+            style={{ animationDelay: `${index * 40}ms` }}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="min-w-0 truncate font-medium">{propertyName(o.property_id)}</p>
+              <span className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">
+                {t(`shop.status.${o.status as "pending_payment"}`)}
+              </span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {t("shop.orderTotal")}: <span className="font-medium text-foreground">{formatPrice(o.total_amount)}</span>
             </p>
-            <span className="shrink-0 rounded-full bg-secondary px-2.5 py-1 text-xs text-secondary-foreground">
-              {t(`shop.status.${o.status as "pending_payment"}`)}
-            </span>
-          </div>
-          <p className="text-sm">
-            {t("shop.orderTotal")}: <span className="font-medium">{formatPrice(o.total_amount)}</span>
-          </p>
-          <p className="text-sm text-muted-foreground">
-            {t("shop.amountEntered")}: {formatPriceNullable(o.payment_proof_amount_entered)}
-          </p>
-          {o.payment_proof_photo_url && (
-            <SignedPhoto
-              path={o.payment_proof_photo_url}
-              alt={t("shop.proof")}
-              className="h-40 w-full rounded-md object-cover"
-            />
+            <div className="mt-auto flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setOpenOrderId(o.id)}>
+                <Eye className="h-4 w-4" aria-hidden="true" />
+                {t("shop.viewOrder")}
+              </Button>
+              {o.status === "proof_submitted" && (
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    patch.mutate({
+                      id: o.id,
+                      values: { status: "verified", verified_at: new Date().toISOString() },
+                    })
+                  }
+                >
+                  {t("shop.verify")}
+                </Button>
+              )}
+              {o.status === "assigned" && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => patch.mutate({ id: o.id, values: { status: "fulfilled" } })}
+                >
+                  {t("shop.fulfil")}
+                </Button>
+              )}
+            </div>
+            {o.status === "verified" && (
+              <Select
+                onValueChange={(v) =>
+                  patch.mutate({ id: o.id, values: { assigned_worker_id: v, status: "assigned" } })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t("shop.assignWorker")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {(workersQ.data ?? []).map((w) => (
+                    <SelectItem key={w.user_id} value={w.user_id}>
+                      {w.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </article>
+        ))}
+        {orders.length === 0 && <p className="text-sm text-muted-foreground">{t("common.none")}</p>}
+      </div>
+
+      <Dialog open={!!detail} onOpenChange={(open) => !open && setOpenOrderId(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("shop.orderDetail")}</DialogTitle>
+          </DialogHeader>
+          {detail && (
+            <div className="space-y-3">
+              <p className="font-medium">{propertyName(detail.property_id)}</p>
+              <p className="text-sm">
+                {t("shop.orderTotal")}: <span className="font-medium">{formatPrice(detail.total_amount)}</span>
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {t("shop.amountEntered")}: {formatPriceNullable(detail.payment_proof_amount_entered)}
+              </p>
+              {detail.payment_proof_photo_url ? (
+                <SignedPhoto
+                  path={detail.payment_proof_photo_url}
+                  alt={t("shop.proof")}
+                  className="max-h-80 w-full rounded-md object-contain"
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("shop.issueNoPhoto")}</p>
+              )}
+            </div>
           )}
-          {o.status === "proof_submitted" && (
-            <Button
-              size="sm"
-              onClick={() =>
-                patch.mutate({
-                  id: o.id,
-                  values: { status: "verified", verified_at: new Date().toISOString() },
-                })
-              }
-            >
-              {t("shop.verify")}
-            </Button>
-          )}
-          {o.status === "verified" && (
-            <Select
-              onValueChange={(v) =>
-                patch.mutate({ id: o.id, values: { assigned_worker_id: v, status: "assigned" } })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={t("shop.assignWorker")} />
-              </SelectTrigger>
-              <SelectContent>
-                {(workersQ.data ?? []).map((w) => (
-                  <SelectItem key={w.user_id} value={w.user_id}>
-                    {w.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          {o.status === "assigned" && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => patch.mutate({ id: o.id, values: { status: "fulfilled" } })}
-            >
-              {t("shop.fulfil")}
-            </Button>
-          )}
-        </article>
-      ))}
-      {(ordersQ.data ?? []).length === 0 && (
-        <p className="text-sm text-muted-foreground">{t("common.none")}</p>
-      )}
-    </div>
+        </DialogContent>
+      </Dialog>
+    </section>
   );
 }
 
@@ -667,6 +726,17 @@ function QrPanel() {
   const { groupId } = useActiveGroup();
   const [busy, setBusy] = useState(false);
 
+  const prefs = useViewPrefs("shop-qr");
+  const [view, setView] = useState<ViewMode>("grid");
+  const [size, setSize] = useState<CardSize>("md");
+
+  useEffect(() => {
+    const saved = prefs.read();
+    setView(saved.view);
+    setSize(saved.size);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const qrQ = useQuery({
     queryKey: ["qr", groupId],
     enabled: !!groupId,
@@ -711,29 +781,48 @@ function QrPanel() {
   });
 
   const qr = qrQ.data;
+  // The QR is a reference image, not a hero: the same view controls used by
+  // the rest of the app decide how big it renders and where it sits.
+  const QR_SIZE: Record<CardSize, string> = { sm: "h-28 w-28", md: "h-44 w-44", lg: "h-72 w-72" };
   const inlineSrc = qr?.data_base64
     ? `data:${qr.content_type};base64,${qr.data_base64}`
     : null;
 
-  return (        <section className="surface max-w-md space-y-3 p-5 transition-all duration-200 hover:shadow-[var(--shadow-lift)]">
-      <h2 className="text-lg">{t("shop.qr")}</h2>
+  return (
+    <section className="surface max-w-2xl space-y-3 p-5 transition-all duration-200 hover:shadow-[var(--shadow-lift)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg">{t("shop.qr")}</h2>
+        <ViewToggle
+          view={view}
+          size={size}
+          onView={(v) => {
+            setView(v);
+            prefs.write({ view: v, size });
+          }}
+          onSize={(sz) => {
+            setSize(sz);
+            prefs.write({ view, size: sz });
+          }}
+        />
+      </div>
       <p className="text-sm text-muted-foreground">{t("shop.qrHelp")}</p>
       <p className="text-xs text-muted-foreground">{t("shop.qrEncrypted")}</p>
+      <div className={view === "grid" ? "space-y-3" : "flex flex-wrap items-start gap-4"}>
       {inlineSrc && (
         <img
           src={inlineSrc}
           alt={t("shop.qr")}
-          className="h-56 w-56 rounded-md object-contain"
+          className={`shrink-0 rounded-md object-contain ${QR_SIZE[size]}`}
         />
       )}
       {!inlineSrc && qr?.legacy_path && (
         <SignedPhoto
           path={qr.legacy_path}
           alt={t("shop.qr")}
-          className="h-56 w-56 rounded-md object-contain"
+          className={`shrink-0 rounded-md object-contain ${QR_SIZE[size]}`}
         />
       )}
-      <div className="space-y-2">
+      <div className="min-w-56 flex-1 space-y-2">
         <Label htmlFor="qr-file">{qr ? t("shop.replaceQr") : t("shop.uploadQr")}</Label>
         <Input
           id="qr-file"
@@ -757,6 +846,7 @@ function QrPanel() {
           {t("shop.deleteQr")}
         </Button>
       )}
+      </div>
     </section>
   );
 }

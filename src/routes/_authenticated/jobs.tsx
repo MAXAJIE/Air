@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { CheckCircle2, ListChecks, Play, Send, Timer } from "lucide-react";
+import { CheckCircle2, ChevronLeft, ChevronRight, Lightbulb, List, ListChecks, PartyPopper, Play, Send, Timer, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -47,6 +47,7 @@ type JobItem = {
   id: string;
   description: string;
   is_checked: boolean;
+  notes: string | null;
   photo_url: string | null;
   sort_order: number;
   requires_photo: boolean;
@@ -64,7 +65,7 @@ function useJobItems(jobId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("cleaning_job_items")
-        .select("id, description, is_checked, photo_url, sort_order, requires_photo")
+        .select("id, description, is_checked, notes, photo_url, sort_order, requires_photo")
         .eq("cleaning_job_id", jobId!)
         .order("sort_order");
       if (error) throw error;
@@ -308,6 +309,10 @@ function ChecklistPanel({ jobId, readOnly }: { jobId: string; readOnly: boolean 
   const t = useT();
   const qc = useQueryClient();
   const itemsQ = useJobItems(jobId);
+   // Guided mode is the default for live work: one step at a time removes the
+  // "wall of checkboxes" and lets the tip for that step do the teaching.
+  const [guided, setGuided] = useState(true);
+  const [step, setStep] = useState(0);
 
   const toggle = useMutation({
     mutationFn: async (item: { id: string; is_checked: boolean }) => {
@@ -336,51 +341,156 @@ function ChecklistPanel({ jobId, readOnly }: { jobId: string; readOnly: boolean 
   const items = itemsQ.data ?? [];
   if (items.length === 0) return null;
 
+  const done = items.filter((i) => i.is_checked).length;
+  const progress = Math.round((done / items.length) * 100);
+  const current = items[Math.min(step, items.length - 1)]!;
+
+  const photoBadge = (item: JobItem) =>
+    item.requires_photo ? (
+      <span
+        className={
+          "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium " +
+          (item.photo_url
+            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+            : "bg-amber-500/10 text-amber-700 dark:text-amber-400")
+        }
+      >
+        {item.photo_url ? t("task.photoDone") : t("task.photoRequired")}
+      </span>
+    ) : null;
+
+
   return (
-    <ul className="space-y-2">
-      {items.map((item) => (
-        <li key={item.id} className="rounded-md border border-border p-3 text-sm">
-          <label className="flex items-start gap-2">
-            <Checkbox
-              checked={item.is_checked}
-              disabled={readOnly}
-              onCheckedChange={(v) =>
-                toggle.mutate({ id: item.id, is_checked: v === true })
-              }
-            />
-            <span className="min-w-0 flex-1">{item.description}</span>
-            {item.requires_photo && (
-              <span
-                className={
-                  "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium " +
-                  (item.photo_url
-                    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                    : "bg-amber-500/10 text-amber-700 dark:text-amber-400")
-                }
-              >
-                {item.photo_url ? t("task.photoDone") : t("task.photoRequired")}
-              </span>
-            )}
-          </label>
-          {!readOnly && item.requires_photo && (
-            <div className="mt-2">
-              <PhotoPicker
-                value={item.photo_url}
-                onChange={(path) => setPhoto.mutate({ id: item.id, photo_url: path })}
-                folder="job-item"
-                label={t("task.proof")}
-              />
-            </div>
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-2 rounded-full bg-primary transition-[width] duration-500"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {done}/{items.length}
+        </span>
+        {!readOnly && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="shrink-0"
+            onClick={() => setGuided((v) => !v)}
+          >
+            {guided ? <List className="h-4 w-4" /> : <Wand2 className="h-4 w-4" />}
+            {guided ? t("clean.items") : t("task.guide")}
+          </Button>
+        )}
+      </div>
+
+      {done === items.length && (
+        <p className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500/10 py-3 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+          <PartyPopper className="h-4 w-4" aria-hidden="true" />
+          {t("task.allDone")}
+        </p>
+      )}
+
+      {guided && !readOnly ? (
+        <div className="rounded-lg border border-border p-4">
+          <p className="text-xs text-muted-foreground">
+            {t("task.step")} {Math.min(step, items.length - 1) + 1} {t("task.of")} {items.length}
+          </p>
+          <p className="mt-1 flex items-start gap-2 text-base font-medium">
+            <span className="min-w-0 flex-1">{current.description}</span>
+            {photoBadge(current)}
+          </p>
+          {current.notes && (
+            <p className="mt-2 flex items-start gap-2 rounded-md bg-muted/60 p-2 text-sm text-muted-foreground">
+              <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              {current.notes}
+            </p>
           )}
-          {readOnly && item.photo_url && (
-            <SignedPhoto
-              path={item.photo_url}
-              alt={item.description}
-              className="mt-2 h-24 w-full rounded-md object-cover"
+          <div className="mt-3">
+            <PhotoPicker
+              value={current.photo_url}
+              onChange={(path) => setPhoto.mutate({ id: current.id, photo_url: path })}
+              folder="job-item"
+              label={t("task.proof")}
             />
-          )}
-        </li>
-      ))}
-    </ul>
+          </div>
+          <div className="mt-4 flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={step === 0}
+              onClick={() => setStep((v) => Math.max(0, v - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              {t("task.prev")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="flex-1"
+              onClick={() => {
+               if (!current.is_checked) toggle.mutate({ id: current.id, is_checked: true });
+                setStep((v) => Math.min(items.length - 1, v + 1));
+              }}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {current.is_checked ? t("task.next") : t("task.markDone")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={step >= items.length - 1}
+              onClick={() => setStep((v) => Math.min(items.length - 1, v + 1))}
+              aria-label={t("task.next")}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item, index) => (
+            <li key={item.id} className="rounded-md border border-border p-3 text-sm">
+              <label className="flex items-start gap-2">
+                <Checkbox
+                  checked={item.is_checked}
+                  disabled={readOnly}
+                  onCheckedChange={(v) => {
+                    setStep(index);
+                    toggle.mutate({ id: item.id, is_checked: v === true });
+                  }}
+                />
+                <span className="min-w-0 flex-1">{item.description}</span>
+                {photoBadge(item)}
+              </label>
+              {item.notes && (
+                <p className="mt-1 pl-6 text-xs text-muted-foreground">{item.notes}</p>
+              )}
+              {!readOnly && (
+                <div className="mt-2">
+                  <PhotoPicker
+                    value={item.photo_url}
+                    onChange={(path) => setPhoto.mutate({ id: item.id, photo_url: path })}
+                    folder="job-item"
+                    label={t("task.proof")}
+                  />
+                </div>
+              )}
+              {readOnly && item.photo_url && (
+                <SignedPhoto
+                  path={item.photo_url}
+                  alt={item.description}
+                  className="mt-2 h-24 w-full rounded-md object-cover"
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

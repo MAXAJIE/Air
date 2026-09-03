@@ -729,6 +729,45 @@ const en = {
     "Only what stays inside the circle is kept. Drag to place your face and zoom to fit.",
   "avatar.zoom": "Zoom",
   "avatar.save": "Use this picture",
+
+  "auth.google": "Continue with Google",
+  "auth.orEmail": "or use email",
+
+  "dash.needsCleaning": "Rooms needing a clean",
+  "dash.complaintsOpen": "Complaints & requests",
+  "dash.attention": "Needs your attention",
+  "dash.allClear": "Nothing needs you right now.",
+  "dash.overdue": "Overdue",
+  "dash.todayLabel": "Today",
+  "dash.later": "Later",
+  "dash.viewAll": "View all",
+  "dash.amenityShort": "Missing amenities",
+  "dash.unassigned": "No cleaner yet",
+
+  "tpl.tip": "Tip / instruction for the cleaner",
+  "tpl.tipHint": "Shown as guidance while the cleaner works this step.",
+  "tpl.photoShort": "Photo",
+
+  "task.guide": "Guided mode",
+  "task.step": "Step",
+  "task.of": "of",
+  "task.next": "Next",
+  "task.prev": "Back",
+  "task.allDone": "All steps done - nice work!",
+  "task.startAt": "Start time",
+  "task.dueTime": "Due time",
+
+  "req.showResolved": "Show resolved",
+  "req.resolvedTitle": "Resolved requests",
+  "req.openTitle": "Open requests",
+
+  "shop.orderDetail": "Order details",
+  "shop.viewOrder": "View",
+
+  "guest.retry": "Try again",
+
+  "perf.completedJobs": "Jobs completed",
+  "perf.onTime": "On time",
 };
 
 type Dict = typeof en;

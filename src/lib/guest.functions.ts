@@ -59,26 +59,47 @@ export const getGuestContext = createServerFn({ method: "POST" })
       .from("properties")
       .select("id, name, owner_group_id")
       .eq("id", data.propertyId)
-      .single();
+      .maybeSingle();
+    if (!property) throw new Error("bad_code");
 
-    const [{ data: amenities }, { data: items }, { data: qr }, { data: lastJob }] = await Promise.all([
-      db.from("amenity_definitions").select("id, name, expected_qty").eq("property_id", data.propertyId),
-      db
-        .from("shopping_items")
-        .select("id, name, price, description, photo_path")
-        .eq("owner_group_id", property!.owner_group_id)
-        .eq("active", true),
+    // The room page must render even when an optional extra (payment QR,
+    // last cleaner, a signed photo) is unavailable, so each is best-effort.
+    const safe = async <T,>(run: () => Promise<T>): Promise<T | null> => {
+      try {
+        return await run();
+      } catch {
+        return null;
+      }
+    };
+
+    const [amenities, items, qr, lastJob] = await Promise.all([
+      safe(async () =>
+        (await db.from("amenity_definitions").select("id, name, expected_qty").eq("property_id", data.propertyId)).data,
+      ),
+      safe(async () =>
+        (
+          await db
+            .from("shopping_items")
+            .select("id, name, price, description, photo_path")
+            .eq("owner_group_id", property.owner_group_id)
+            .eq("active", true)
+        ).data,
+      ),
       // QR bytes are encrypted at rest; the RPC decrypts for the service role.
-      db.rpc("get_payment_qr", { p_group: property!.owner_group_id }),
-      db
-        .from("cleaning_jobs")
-        .select("id, assigned_to_user_id, completed_at")
-        .eq("property_id", data.propertyId)
-        .not("assigned_to_user_id", "is", null)
-        .not("completed_at", "is", null)
-        .order("completed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+      safe(async () => (await db.rpc("get_payment_qr", { p_group: property.owner_group_id })).data),
+      safe(async () =>
+        (
+          await db
+            .from("cleaning_jobs")
+            .select("id, assigned_to_user_id, completed_at")
+            .eq("property_id", data.propertyId)
+            .not("assigned_to_user_id", "is", null)
+            .not("completed_at", "is", null)
+            .order("completed_at", { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        ).data,
+      ),
     ]);
 
     const qrRow = (qr ?? null) as
@@ -88,17 +109,23 @@ export const getGuestContext = createServerFn({ method: "POST" })
     if (qrRow?.data_base64) {
       qrUrl = `data:${qrRow.content_type};base64,${qrRow.data_base64}`;
     } else if (qrRow?.legacy_path) {
-      const { data: signed } = await db.storage.from("photos").createSignedUrl(qrRow.legacy_path, 3600);
+      const signed = await safe(async () =>
+        (await db.storage.from("photos").createSignedUrl(qrRow.legacy_path!, 3600)).data,
+      );
       qrUrl = signed?.signedUrl ?? null;
     }
 
     let cleaner: { jobId: string; userId: string; name: string } | null = null;
     if (lastJob?.assigned_to_user_id) {
-      const { data: profile } = await db
-        .from("profiles")
-        .select("display_name, username")
-        .eq("user_id", lastJob.assigned_to_user_id)
-        .maybeSingle();
+      const profile = await safe(async () =>
+        (
+          await db
+            .from("profiles")
+            .select("display_name, username")
+            .eq("user_id", lastJob.assigned_to_user_id!)
+            .maybeSingle()
+        ).data,
+      );
       cleaner = {
         jobId: lastJob.id,
         userId: lastJob.assigned_to_user_id,
@@ -107,16 +134,16 @@ export const getGuestContext = createServerFn({ method: "POST" })
     }
 
     return {
-      propertyName: property!.name,
+      propertyName: property.name,
       amenities: amenities ?? [],
       catalog: await Promise.all(
         (items ?? []).map(async (i) => {
           // Sign the item photo so the guest (anonymous, no auth) can render it.
           let photoUrl: string | null = null;
           if (i.photo_path) {
-            const { data: signed } = await db.storage
-              .from("photos")
-              .createSignedUrl(i.photo_path, 3600);
+            const signed = await safe(async () =>
+              (await db.storage.from("photos").createSignedUrl(i.photo_path!, 3600)).data,
+            );
             photoUrl = signed?.signedUrl ?? null;
           }
           return {

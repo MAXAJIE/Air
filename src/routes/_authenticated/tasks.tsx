@@ -278,7 +278,6 @@ function TasksPage() {
 type CreatePerson = { userId: string; name: string; roles: string[] };
 type CreateTemplate = { id: string; name: string };
 
-const DURATION_OPTIONS = Array.from({ length: 24 }, (_, i) => (i + 1) * 5); // 5..120 min
 
 function CreateTaskDialog({
   groupId,
@@ -302,8 +301,8 @@ function CreateTaskDialog({
   const [description, setDescription] = useState("");
   const [assignee, setAssignee] = useState<string>("");
   const [propertyId, setPropertyId] = useState<string>("none");
+  const [startAt, setStartAt] = useState("");
   const [dueAt, setDueAt] = useState("");
-  const [durationMin, setDurationMin] = useState<string>("");
   const [templateId, setTemplateId] = useState<string>("");
   const [scheduledAt, setScheduledAt] = useState<string>("");
   const [isPrivate, setIsPrivate] = useState(false);
@@ -320,11 +319,9 @@ function CreateTaskDialog({
     setAssignee("");
   };
 
-  // "When do you want the job done?" — quick-pick maps to due_at from now.
-  const resolvedDueAt = () => {
-    if (durationMin) return new Date(Date.now() + Number(durationMin) * 60_000).toISOString();
-    return dueAt ? new Date(dueAt).toISOString() : null;
-  };
+  // A job is a timeframe, not a stopwatch: the worker is told when to start
+  // and when it must be finished, both as real clock times.
+  const iso = (value: string) => (value ? new Date(value).toISOString() : null);
 
   const create = useMutation({
     mutationFn: async () => {
@@ -380,7 +377,8 @@ function CreateTaskDialog({
           property_id: propertyIdVal,
           title: (title.trim() || template?.name) ?? "Cleaning",
           description: description.trim() || null,
-          due_at: resolvedDueAt(),
+          start_at: iso(startAt),
+          due_at: iso(dueAt),
           is_private: false,
           source: "cleaning",
           cleaning_job_id: job!.id,
@@ -395,7 +393,8 @@ function CreateTaskDialog({
         property_id: propertyId === "none" ? null : propertyId,
         title: title.trim(),
         description: description.trim() || null,
-        due_at: resolvedDueAt(),
+        start_at: iso(startAt),
+        due_at: iso(dueAt),
         is_private: isPrivate,
         source: "manual",
       });
@@ -510,34 +509,26 @@ function CreateTaskDialog({
               </div>
             </>
           )}
-          <div className="space-y-2">
-            <Label>When do you want the job done?</Label>
-            <Select value={durationMin} onValueChange={setDurationMin}>
-              <SelectTrigger>
-                <SelectValue placeholder="Pick a duration" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Custom / no deadline</SelectItem>
-                {DURATION_OPTIONS.map((min) => (
-                  <SelectItem key={min} value={String(min)}>
-                    {min} min
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Sets a countdown from now. Overrides the manual due date below.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="task-due">{t("task.due")}</Label>
-            <Input
-              id="task-due"
-              type="datetime-local"
-              value={dueAt}
-              onChange={(e) => setDueAt(e.target.value)}
-              disabled={!!durationMin}
-            />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="task-start">{t("task.startAt")}</Label>
+              <Input
+                id="task-start"
+                type="datetime-local"
+                value={startAt}
+                onChange={(e) => setStartAt(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-due">{t("task.dueTime")}</Label>
+              <Input
+                id="task-due"
+                type="datetime-local"
+                value={dueAt}
+                min={startAt || undefined}
+                onChange={(e) => setDueAt(e.target.value)}
+              />
+            </div>
           </div>
           {jobType === "normal" && (
             <label className="flex items-center gap-2 text-sm">

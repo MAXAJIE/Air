@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GoogleSignIn } from "@/components/google-sign-in";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
@@ -180,7 +181,12 @@ function AuthPage() {
             </div>
           </form>
         ) : (
-          <Tabs defaultValue={mode === "signup" ? "signup" : "signin"}>
+          <div className="space-y-4">
+            <div className="surface space-y-3 p-6">
+              <GoogleSignIn />
+              <p className="text-center text-xs text-muted-foreground">{t("auth.orEmail")}</p>
+            </div>
+            <Tabs defaultValue={mode === "signup" ? "signup" : "signin"}>
             <TabsList className="w-full">
               <TabsTrigger value="signin" className="flex-1">
                 {t("auth.signIn")}
@@ -298,7 +304,8 @@ function AuthPage() {
                 </Button>
               </form>
             </TabsContent>
-          </Tabs>
+            </Tabs>
+          </div>
         )}
       </main>
     </div>

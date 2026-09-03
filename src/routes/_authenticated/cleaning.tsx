@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Building2, CheckCircle2, Eye, Pencil, Plus, Trash2, UserRound } from "lucide-react";
+import { Building2, Camera, CheckCircle2, Eye, Package, Pencil, Plus, Sparkles, Trash2, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -109,7 +109,7 @@ function toLocalInput(iso: string | null): string {
 async function snapshotTemplate(jobId: string, templateId: string) {
   const { data: items, error } = await supabase
     .from("cleaning_template_items")
-    .select("description, sort_order, requires_photo")
+    .select("description, notes, sort_order, requires_photo")
     .eq("template_id", templateId)
     .order("sort_order");
   if (error) throw error;
@@ -118,6 +118,7 @@ async function snapshotTemplate(jobId: string, templateId: string) {
     items.map((item, index) => ({
       cleaning_job_id: jobId,
       description: item.description,
+      notes: item.notes,
       sort_order: item.sort_order ?? index + 1,
       // Photo requirement is copied at snapshot time so later template
       // edits can't retroactively change what a cleaner-in-progress
@@ -138,6 +139,7 @@ function JobsPanel() {
   const [assignee, setAssignee] = useState("");
   const [hrCompanyId, setHrCompanyId] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
   const [editingJob, setEditingJob] = useState<JobRow | null>(null);
   const [previewJob, setPreviewJob] = useState<JobRow | null>(null);
 
@@ -271,6 +273,7 @@ function JobsPanel() {
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["jobs", groupId] });
       await qc.invalidateQueries({ queryKey: ["tasks", groupId] });
+      setFormOpen(false);
       setPropertyId("");
       setTemplateId("");
       setAssignType("direct");
@@ -333,9 +336,21 @@ function JobsPanel() {
     id ? (cleanersQ.data?.find((c) => c.user_id === id)?.name ?? id.slice(0, 8)) : t("common.unassigned");
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_1.3fr]">
-      <section className="surface space-y-4 p-5">
-        <h2 className="text-lg">{t("clean.newJob")}</h2>
+    <div className="space-y-4">
+      {/* Scheduling is an occasional action, so it lives behind one button and
+          the page stays a single readable list of jobs. */}
+      <div className="flex justify-end">
+        <Button onClick={() => setFormOpen(true)}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {t("clean.newJob")}
+        </Button>
+      </div>
+
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent className="max-h-[90vh] space-y-4 overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("clean.newJob")}</DialogTitle>
+          </DialogHeader>
         <div className="space-y-2">
           <Label>{t("clean.property")}</Label>
           <Select
@@ -463,7 +478,8 @@ function JobsPanel() {
         >
           {t("clean.newJob")}
         </Button>
-      </section>
+        </DialogContent>
+      </Dialog>
 
       <section className="surface p-5">
         <h2 className="mb-1 text-lg">{t("clean.jobs")}</h2>
@@ -812,27 +828,29 @@ function TemplatesPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="inline-flex rounded-xl border border-border bg-muted/40 p-1">
-        <button
-          type="button"
-          onClick={() => setKind("cleaning")}
-          className={cn(
-            "rounded-lg px-3 py-1.5 text-sm transition-colors",
-            kind === "cleaning" ? "bg-background shadow-sm" : "text-muted-foreground",
-          )}
-        >
-          {t("tpl.kindCleaning")}
-        </button>
-        <button
-          type="button"
-          onClick={() => setKind("amenity")}
-          className={cn(
-            "rounded-lg px-3 py-1.5 text-sm transition-colors",
-            kind === "amenity" ? "bg-background shadow-sm" : "text-muted-foreground",
-          )}
-        >
-          {t("tpl.kindAmenity")}
-        </button>
+      {/* Two words, two icons: the switch reads at a glance instead of
+          competing with the page content. */}
+      <div className="inline-flex rounded-full bg-muted p-1 text-sm">
+        {([
+          { value: "cleaning", label: t("tpl.kindCleaning"), Icon: Sparkles },
+          { value: "amenity", label: t("tpl.kindAmenity"), Icon: Package },
+        ] as const).map(({ value, label, Icon }) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={kind === value}
+            onClick={() => setKind(value)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-4 py-1.5 transition-colors",
+              kind === value
+                ? "bg-background font-medium shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="h-4 w-4" aria-hidden="true" />
+            {label}
+          </button>
+        ))}
       </div>
       {kind === "cleaning" ? <CleaningTemplatesPanel /> : <AmenityTemplatesPanel />}
     </div>
@@ -1539,26 +1557,34 @@ function TemplateDialog({
                     <Textarea
                       rows={2}
                       value={item.notes}
-                      placeholder={t("tpl.itemNotes")}
+                      placeholder={t("tpl.tip")}
                       onChange={(e) =>
                         setItems((prev) =>
                           prev.map((row) => (row.key === item.key ? { ...row, notes: e.target.value } : row)),
                         )
                       }
                     />
-                    <label className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={item.requires_photo}
-                        onCheckedChange={(checked) =>
-                          setItems((prev) =>
-                            prev.map((row) =>
-                              row.key === item.key ? { ...row, requires_photo: checked === true } : row,
-                            ),
-                          )
-                        }
-                      />
-                      {t("tpl.requiresPhoto")}
-                    </label>
+                    <p className="text-xs text-muted-foreground">{t("tpl.tipHint")}</p>
+                    <button
+                      type="button"
+                      aria-pressed={item.requires_photo}
+                      onClick={() =>
+                        setItems((prev) =>
+                          prev.map((row) =>
+                            row.key === item.key ? { ...row, requires_photo: !row.requires_photo } : row,
+                          ),
+                        )
+                      }
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors",
+                        item.requires_photo
+                          ? "border-transparent bg-primary text-primary-foreground"
+                          : "border-border text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <Camera className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t("tpl.photoShort")}
+                    </button>
                   </div>
                   <Button
                     type="button"

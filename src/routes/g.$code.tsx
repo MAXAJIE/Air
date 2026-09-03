@@ -347,6 +347,20 @@ function GuestByCodePage() {
           <p className="text-xs text-muted-foreground">
             <span className="font-mono">{code}</span>
           </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              // A failed extra (QR, cleaner lookup) is usually transient, so
+              // offer a plain retry before sending the guest to reception.
+              setErrorMessage("");
+              setView("loading");
+              void propertyQ.refetch();
+              void contextQ.refetch();
+            }}
+          >
+            {t("guest.retry")}
+          </Button>
         </div>
       </div>
     );

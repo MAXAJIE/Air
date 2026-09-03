@@ -13,7 +13,6 @@ import {
   Users,
 } from "lucide-react";
 import { useEffect, useMemo } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { PageHeader, StatCard, StatsSkeleton, ListSkeleton } from "@/components/app-shell";
 import { useActiveGroup, useAuthUser, useProfile } from "@/hooks/use-app";
@@ -66,45 +65,29 @@ type Bucket = { name: string; value: number };
  */
 function CountBars({ title, data }: { title: string; data: Bucket[] }) {
   const t = useT();
+  const max = Math.max(1, ...data.map((d) => d.value));
   return (
     <section className="surface p-5">
       <h2 className="mb-3 text-lg">{title}</h2>
       {data.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("common.none")}</p>
       ) : (
-        <div style={{ height: Math.max(160, data.length * 44) }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} layout="vertical" margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
-              <CartesianGrid horizontal={false} stroke="var(--color-border)" />
-              <XAxis
-                type="number"
-                allowDecimals={false}
-                stroke="var(--color-muted-foreground)"
-                fontSize={12}
-              />
-              <YAxis
-                type="category"
-                dataKey="name"
-                width={120}
-                stroke="var(--color-muted-foreground)"
-                fontSize={12}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: "var(--color-card)",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: 12,
-                  color: "var(--color-card-foreground)",
-                }}
-              />
-              <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={18}>
-                {data.map((_, i) => (
-                  <Cell key={i} fill={CHART[i % CHART.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        <ul className="space-y-2.5">
+          {data.map((bucket, i) => (
+            <li key={bucket.name} className="text-sm">
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <span className="truncate">{bucket.name}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">{bucket.value}</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted">
+                <div
+                  className="h-2 rounded-full transition-[width] duration-500"
+                  style={{ width: `${(bucket.value / max) * 100}%`, background: CHART[i % CHART.length] }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );
@@ -180,6 +163,44 @@ function Dashboard() {
   );
 }
 
+/** One actionable row: what happened, where, and how urgent. */
+function AttentionRow({
+  tone,
+  title,
+  detail,
+  when,
+  propertyId,
+}: {
+  tone: "urgent" | "warn" | "info";
+  title: string;
+  detail: string;
+  when: string;
+  propertyId?: string;
+}) {
+  const dot =
+    tone === "urgent" ? "bg-destructive" : tone === "warn" ? "bg-amber-500" : "bg-blue-500";
+  return (
+    <li className="flex items-start gap-3 py-3">
+      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        {propertyId ? (
+          <Link
+            to="/properties/$propertyId"
+            params={{ propertyId }}
+            className="truncate font-medium hover:underline"
+          >
+            {title}
+          </Link>
+        ) : (
+          <p className="truncate font-medium">{title}</p>
+        )}
+        <p className="truncate text-sm text-muted-foreground">{detail}</p>
+      </div>
+      <span className="shrink-0 text-xs text-muted-foreground">{when}</span>
+    </li>
+  );
+}
+
 function OwnerDashboard() {
   const t = useT();
   const { groupId } = useActiveGroup();
@@ -193,12 +214,23 @@ function OwnerDashboard() {
         supabase.from("property_statuses").select("id, label").eq("owner_group_id", groupId!),
         supabase
           .from("cleaning_jobs")
-          .select("id, status, property_id, scheduled_at, created_at")
+          .select("id, status, property_id, scheduled_at, created_at, assigned_to_user_id")
           .eq("owner_group_id", groupId!)
+          .neq("status", "reviewed")
+          .order("scheduled_at", { ascending: true })
+          .limit(50),
+        supabase
+          .from("amenity_checks")
+          .select("id, is_discrepancy, property_id, checked_at")
+          .eq("is_discrepancy", true)
+          .order("checked_at", { ascending: false })
+          .limit(200),
+        supabase
+          .from("special_requests")
+          .select("id, status, property_id, description, created_at")
+          .neq("status", "resolved")
           .order("created_at", { ascending: false })
           .limit(50),
-        supabase.from("amenity_checks").select("id, is_discrepancy, property_id").limit(500),
-        supabase.from("special_requests").select("id, status, property_id").eq("status", "open"),
       ]);
       return {
         properties: props.data ?? [],
@@ -210,51 +242,74 @@ function OwnerDashboard() {
     },
   });
 
-  const stats = useMemo(() => {
+  /**
+   * The dashboard answers one question: what needs a decision today. Cleans,
+   * complaints and missing amenities are merged into a single urgency-sorted
+   * feed so the state of the business reads in one glance.
+   */
+  const view = useMemo(() => {
     const properties = data?.properties ?? [];
-    const statusById = new Map((data?.statuses ?? []).map((s) => [s.id, s.label]));
-    const propIds = new Set(properties.map((p) => p.id));
-    const ready = properties.filter((p) => statusById.get(p.status_id ?? "") === "Ready").length;
-    const openJobs = (data?.jobs ?? []).filter((j) => j.status !== "reviewed").length;
-    const discrepancies = (data?.checks ?? []).filter(
-      (c) => c.is_discrepancy && propIds.has(c.property_id),
-    ).length;
-    const requests = (data?.requests ?? []).filter((r) => propIds.has(r.property_id)).length;
+    const nameById = new Map(properties.map((p) => [p.id, p.name]));
+    const mine = new Set(properties.map((p) => p.id));
+    const statusById = new Map((data?.statuses ?? []).map((st) => [st.id, st.label]));
+    const now = Date.now();
+    const endOfToday = new Date().setHours(23, 59, 59, 999);
 
-    const dist = new Map<string, number>();
-    for (const p of properties) {
-      const label = statusById.get(p.status_id ?? "") ?? "Unassigned";
-      dist.set(label, (dist.get(label) ?? 0) + 1);
-    }
-    return {
-      total: properties.length,
-      ready,
-      openJobs,
-      discrepancies,
-      requests,
-      dist: [...dist]
-        .map(([name, value]) => ({ name, value }))
-        .sort((a, b) => b.value - a.value),
+    const when = (iso: string | null) => {
+      if (!iso) return { tone: "info" as const, label: t("dash.later"), order: 2 };
+      const ts = new Date(iso).getTime();
+      if (ts < now) return { tone: "urgent" as const, label: t("dash.overdue"), order: 0 };
+      if (ts <= endOfToday) return { tone: "warn" as const, label: t("dash.todayLabel"), order: 1 };
+      return { tone: "info" as const, label: new Date(iso).toLocaleDateString(), order: 2 };
     };
-  }, [data]);
 
-  const activity: ActivityRow[] = useMemo(() => {
-    const nameById = new Map((data?.properties ?? []).map((p) => [p.id, p.name]));
-    return (data?.jobs ?? []).map((job) => ({
-      id: job.id,
-      title: nameById.get(job.property_id) ?? t("clean.property"),
-      meta: `${t(`clean.status.${job.status}` as TranslationKey)} · ${shortDate(job.scheduled_at ?? job.created_at)}`,
-      to: { propertyId: job.property_id },
-    }));
+    const cleaning = (data?.jobs ?? [])
+      .filter((j) => mine.has(j.property_id))
+      .map((j) => {
+        const w = when(j.scheduled_at ?? j.created_at);
+        return {
+          key: `job-${j.id}`,
+          tone: w.tone,
+          order: w.order,
+          title: nameById.get(j.property_id) ?? t("clean.property"),
+          detail: `${t(`clean.status.${j.status}` as TranslationKey)} · ${
+            j.assigned_to_user_id ? t("clean.assignTo") : t("dash.unassigned")
+          }`,
+          when: w.label,
+          propertyId: j.property_id,
+        };
+      });
+
+    const complaints = (data?.requests ?? [])
+      .filter((r) => mine.has(r.property_id))
+      .map((r) => ({
+        key: `req-${r.id}`,
+        tone: "urgent" as const,
+        order: 0,
+        title: nameById.get(r.property_id) ?? t("clean.property"),
+        detail: r.description,
+        when: new Date(r.created_at).toLocaleDateString(),
+        propertyId: r.property_id,
+      }));
+
+    const amenity = (data?.checks ?? []).filter((c) => mine.has(c.property_id));
+
+    return {
+      feed: [...complaints, ...cleaning].sort((a, b) => a.order - b.order),
+      cleaningCount: cleaning.length,
+      complaintCount: complaints.length,
+      amenityCount: amenity.length,
+      total: properties.length,
+      ready: properties.filter((p) => statusById.get(p.status_id ?? "") === "Ready").length,
+    };
   }, [data, t]);
 
   if (isLoading) {
     return (
       <>
-        <StatsSkeleton count={4} />
-        <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-          <ListSkeleton rows={4} />
-          <ListSkeleton rows={5} />
+        <StatsSkeleton count={3} />
+        <div className="mt-6">
+          <ListSkeleton rows={6} />
         </div>
       </>
     );
@@ -262,17 +317,40 @@ function OwnerDashboard() {
 
   return (
     <>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label={t("dash.properties")} value={stats.total} icon={Building2} hint={`${stats.ready} ${t("prop.statusList")}`} delay={0} />
-        <StatCard label={t("dash.openJobs")} value={stats.openJobs} icon={Sparkle} delay={80} />
-        <StatCard label={t("dash.discrepancies")} value={stats.discrepancies} icon={AlertTriangle} delay={160} />
-        <StatCard label={t("dash.requests")} value={stats.requests} icon={MessageSquare} delay={240} />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label={t("dash.complaintsOpen")} value={view.complaintCount} icon={MessageSquare} delay={0} />
+        <StatCard label={t("dash.needsCleaning")} value={view.cleaningCount} icon={Sparkle} delay={80} />
+        <StatCard label={t("dash.amenityShort")} value={view.amenityCount} icon={AlertTriangle} delay={160} />
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_1.4fr]">
-        <CountBars title={t("dash.byStatus")} data={stats.dist} />
-        <ActivityList rows={activity} />
-      </div>
+      <section className="surface mt-6 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg">{t("dash.attention")}</h2>
+          <Link to="/cleaning" className="text-sm text-muted-foreground hover:underline">
+            {t("dash.viewAll")}
+          </Link>
+        </div>
+        <ul className="divide-y divide-border">
+          {view.feed.slice(0, 8).map((row) => (
+            <AttentionRow
+              key={row.key}
+              tone={row.tone}
+              title={row.title}
+              detail={row.detail}
+              when={row.when}
+              propertyId={row.propertyId}
+            />
+          ))}
+          {view.feed.length === 0 && (
+            <li className="py-8 text-center text-sm text-muted-foreground">{t("dash.allClear")}</li>
+          )}
+        </ul>
+      </section>
+
+      <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+        <Building2 className="h-4 w-4" aria-hidden="true" />
+        {view.ready}/{view.total} {t("dash.properties")}
+      </p>
     </>
   );
 }

@@ -23,6 +23,7 @@ import {
 import { useActiveGroup, useAuthUser } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
+import { cn } from "@/lib/utils";
 
 /** Guest-raised special requests for the active group, with assignment and resolve. */
 export function RequestsPanel() {
@@ -177,6 +178,12 @@ export function RequestsPanel() {
     workerId: string;
     workerName: string;
   } | null>(null);
+  // Resolved requests are history: keep the board to what still needs action.
+  const [showResolved, setShowResolved] = useState(false);
+  const all = reqQ.data ?? [];
+  const open = all.filter((r) => r.status !== "resolved");
+  const resolved = all.filter((r) => r.status === "resolved");
+  const visible = showResolved ? resolved : open;
 
   return (
     <div className="space-y-4">
@@ -193,8 +200,30 @@ export function RequestsPanel() {
         </ul>
       </section>
 
+      <div className="inline-flex rounded-full bg-muted p-1 text-sm">
+        {([
+          { value: false, label: `${t("req.openTitle")} (${open.length})` },
+          { value: true, label: `${t("req.showResolved")} (${resolved.length})` },
+        ] as const).map((tab) => (
+          <button
+            key={String(tab.value)}
+            type="button"
+            aria-pressed={showResolved === tab.value}
+            onClick={() => setShowResolved(tab.value)}
+            className={cn(
+              "rounded-full px-4 py-1.5 transition-colors",
+              showResolved === tab.value
+                ? "bg-background font-medium shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {(reqQ.data ?? []).map((r) => (
+        {visible.map((r) => (
           <article key={r.id} className="surface space-y-3 p-5">
             <div className="flex items-start justify-between gap-2">
               <p className="min-w-0 truncate font-medium">
@@ -246,9 +275,7 @@ export function RequestsPanel() {
             )}
           </article>
         ))}
-        {(reqQ.data ?? []).length === 0 && (
-          <p className="text-sm text-muted-foreground">{t("req.empty")}</p>
-        )}
+        {visible.length === 0 && <p className="text-sm text-muted-foreground">{t("req.empty")}</p>}
       </div>
 
       {/* Confirmation dialog for assigning a worker */}
