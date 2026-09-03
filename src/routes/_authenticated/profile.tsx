@@ -1,18 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Lock, Mail, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { Lock, Mail, Settings, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { AvatarCropPicker } from "@/components/avatar-crop-picker";
 import { PasswordMeter } from "@/components/password-meter";
-import { PhotoPicker } from "@/components/photo-picker";
 import { SignedPhoto } from "@/components/signed-photo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useProfile } from "@/hooks/use-app";
+import { useActiveGroup, useProfile } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { scorePassword } from "@/lib/password-strength";
@@ -151,15 +150,9 @@ function ProfilePreview() {
         <p className="text-sm">
           {pii?.completed ? t("profile.complete") : t("profile.incomplete")}
         </p>
-        <div className="grid gap-4 md:grid-cols-[minmax(0,200px)_minmax(0,1fr)]">
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">{t("profile.selfie")}</p>
-            <SignedPhoto
-              path={pii?.selfie_path ?? null}
-              alt={t("profile.selfie")}
-              className="h-40 w-full object-cover"
-            />
-          </div>
+        {/* The profile picture at the top of this page is the only portrait
+            we keep, so the separate selfie square is gone. */}
+        <div>
           <dl className="grid gap-3 sm:grid-cols-2">
             {rows.map(([label, value]) => (
               <div key={label}>
@@ -183,6 +176,7 @@ function ProfileEditor({ onDone }: { onDone: () => void }) {
       <AccountCard onDone={onDone} />
       <SecurityCard />
       <PersonalCard onDone={onDone} />
+      <HistoryCard />
     </div>
   );
 }
@@ -330,6 +324,62 @@ function SecurityCard() {
   );
 }
 
+/** Owner-only housekeeping: archive finished records so lists stay short. */
+function HistoryCard() {
+  const t = useT();
+  const qc = useQueryClient();
+  const { data: profile } = useProfile();
+  const { groupId } = useActiveGroup();
+
+  const clear = useMutation({
+    mutationFn: async (scope: "complaints" | "cleaning" | "tasks" | "all") => {
+      const { error } = await supabase.rpc("clear_history", {
+        p_group: groupId!,
+        p_scope: scope,
+      });
+      if (error) throw error;
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries();
+      toast.success(t("profile.cleared"));
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  if (profile?.primary_role !== "owner" || !groupId) return null;
+
+  const action = (scope: "complaints" | "cleaning" | "tasks" | "all", label: string) => (
+    <Button
+      type="button"
+      variant={scope === "all" ? "destructive" : "outline"}
+      disabled={clear.isPending}
+      onClick={() => {
+        if (window.confirm(t("profile.clearConfirm"))) clear.mutate(scope);
+      }}
+    >
+      {label}
+    </Button>
+  );
+
+  return (
+    <section className="surface space-y-4 p-5 lg:col-span-2">
+      <div>
+        <h2 className="flex items-center gap-2 text-lg">
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
+          {t("profile.clearTitle")}
+        </h2>
+        <p className="text-sm text-muted-foreground">{t("profile.clearHelp")}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {action("complaints", t("profile.clearComplaints"))}
+        {action("cleaning", t("profile.clearCleaning"))}
+        {action("tasks", t("profile.clearTasks"))}
+        {action("all", t("profile.clearAll"))}
+      </div>
+    </section>
+  );
+}
+
 function usePii() {
   const { data: profile } = useProfile();
   return useQuery({
@@ -357,7 +407,8 @@ function PersonalCard({ onDone }: { onDone: () => void }) {
     emergency_name: "",
     emergency_phone: "",
   });
-  const [selfie, setSelfie] = useState<string | null>(null);
+  // Kept so saving personal details never wipes an existing selfie path.
+  const [selfie] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -371,7 +422,6 @@ function PersonalCard({ onDone }: { onDone: () => void }) {
       emergency_name: d.emergency_name ?? "",
       emergency_phone: d.emergency_phone ?? "",
     });
-    setSelfie(d.selfie_path ?? null);
     setHydrated(true);
   }, [hydrated, piiQ.data]);
 
@@ -386,7 +436,7 @@ function PersonalCard({ onDone }: { onDone: () => void }) {
         p_address: "",
         p_emergency_name: form.emergency_name,
         p_emergency_phone: form.emergency_phone,
-        p_selfie_path: selfie ?? "",
+        p_selfie_path: piiQ.data?.selfie_path ?? selfie ?? "",
       });
       if (error) throw error;
     },
@@ -420,18 +470,7 @@ function PersonalCard({ onDone }: { onDone: () => void }) {
         <p className="text-sm text-muted-foreground">{t("profile.encryptedNote")}</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
-        <div className="space-y-2">
-          <Label>{t("profile.selfie")}</Label>
-          <PhotoPicker
-            value={selfie}
-            onChange={setSelfie}
-            folder="selfie"
-            label={t("profile.selfie")}
-          />
-          <p className="text-xs text-muted-foreground">{t("profile.selfieHelp")}</p>
-        </div>
-
+      <div>
         <div className="grid gap-4 sm:grid-cols-2">
           {field("full_name", t("profile.fullName"))}
           {field("id_number", t("profile.idNumber"))}

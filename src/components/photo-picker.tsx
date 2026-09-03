@@ -1,29 +1,37 @@
 import { useMutation } from "@tanstack/react-query";
 import { ImagePlus, Loader2, X } from "lucide-react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { ImageCropDialog } from "@/components/image-crop-dialog";
 import { SignedPhoto } from "@/components/signed-photo";
 import { Button } from "@/components/ui/button";
 import { fileToBase64 } from "@/lib/files";
 import { uploadPhoto } from "@/lib/photos.functions";
 import { cn } from "@/lib/utils";
 
-/** Drop-in image field: uploads to private storage and hands back the object path. */
+/**
+ * Drop-in image field: opens a square/rectangular cropper matching the display
+ * area, then uploads to private storage and hands back the object path.
+ */
 export function PhotoPicker({
   value,
   onChange,
   folder,
   label,
   className,
+  /** width / height of the area this image is displayed in. */
+  aspect = 3 / 2,
 }: {
   value: string | null;
   onChange: (path: string | null) => void;
   folder: string;
   label: string;
   className?: string;
+  aspect?: number;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<File | null>(null);
 
   const upload = useMutation({
     mutationFn: async (file: File) => {
@@ -34,7 +42,10 @@ export function PhotoPicker({
       });
       return result.path;
     },
-    onSuccess: (path) => onChange(path),
+    onSuccess: (path) => {
+      setPending(null);
+      onChange(path);
+    },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Upload failed"),
   });
 
@@ -84,8 +95,22 @@ export function PhotoPicker({
         onChange={(e) => {
           const file = e.target.files?.[0];
           e.target.value = "";
-          if (file) upload.mutate(file);
+          if (!file) return;
+          if (file.size > 8 * 1024 * 1024) {
+            toast.error("Image must be under 8 MB");
+            return;
+          }
+          setPending(file);
         }}
+      />
+
+      {/* Position the picture inside the frame it will be shown in. */}
+      <ImageCropDialog
+        file={pending}
+        aspect={aspect}
+        busy={upload.isPending}
+        onCancel={() => setPending(null)}
+        onCropped={(cropped) => upload.mutate(cropped)}
       />
     </div>
   );

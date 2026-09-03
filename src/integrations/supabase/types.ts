@@ -17,6 +17,7 @@ export type Database = {
       activity_log: {
         Row: {
           action: string
+          actor_role: string | null
           actor_user_id: string | null
           created_at: string
           entity_id: string | null
@@ -27,6 +28,7 @@ export type Database = {
         }
         Insert: {
           action: string
+          actor_role?: string | null
           actor_user_id?: string | null
           created_at?: string
           entity_id?: string | null
@@ -37,6 +39,7 @@ export type Database = {
         }
         Update: {
           action?: string
+          actor_role?: string | null
           actor_user_id?: string | null
           created_at?: string
           entity_id?: string | null
@@ -1356,6 +1359,7 @@ export type Database = {
         Returns: number
       }
       can_view_pii: { Args: { _user: string }; Returns: boolean }
+      clear_history: { Args: { p_group: string; p_scope: string }; Returns: number }
       delete_payment_qr: { Args: { p_group: string }; Returns: undefined }
       email_for_username: { Args: { p_username: string }; Returns: string }
       get_payment_qr: { Args: { p_group: string }; Returns: Json }

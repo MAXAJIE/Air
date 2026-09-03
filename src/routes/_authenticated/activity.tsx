@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 import { ListSkeleton, PageHeader } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
-import { useActiveGroup, useAuthUser } from "@/hooks/use-app";
+import { useActiveGroup, useAuthUser, useProfile } from "@/hooks/use-app";
 import { useT, type TranslationKey } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,7 @@ export const Route = createFileRoute("/_authenticated/activity")({
 type ActivityRow = {
   id: string;
   actor_user_id: string | null;
+  actor_role: string | null;
   owner_group_id: string | null;
   action: string;
   entity_type: string;
@@ -38,21 +39,28 @@ function ActivityPage() {
   const qc = useQueryClient();
   const { data: user } = useAuthUser();
   const { groupId } = useActiveGroup();
+  const { data: profile } = useProfile();
+  const role = profile?.primary_role ?? null;
   const [scope, setScope] = useState<"mine" | "all">("mine");
 
   const activityQ = useQuery({
-    queryKey: ["activity", user?.id, groupId, scope],
+    queryKey: ["activity", user?.id, groupId, scope, role],
     enabled: !!user?.id,
     staleTime: 0,
     refetchInterval: 20_000,
     queryFn: async () => {
       let query = supabase
         .from("activity_log")
-        .select("id, actor_user_id, owner_group_id, action, entity_type, entity_id, created_at")
+        .select(
+          "id, actor_user_id, actor_role, owner_group_id, action, entity_type, entity_id, created_at",
+        )
         .order("created_at", { ascending: false })
         .limit(200);
       if (scope === "mine") query = query.eq("actor_user_id", user!.id);
       else if (groupId) query = query.eq("owner_group_id", groupId);
+      // An owner and a cleaning company are different entities: neither one
+      // reads the other's history, even inside the same group.
+      if (scope === "all" && role) query = query.eq("actor_role", role);
       const { data, error } = await query;
       if (error) throw error;
       return (data ?? []) as ActivityRow[];

@@ -26,6 +26,7 @@ import { Route as AuthenticatedPerformanceRouteImport } from './routes/_authenti
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
 import { Route as AuthenticatedRequestsRouteImport } from './routes/_authenticated/requests'
 import { Route as AuthenticatedReviewsRouteImport } from './routes/_authenticated/reviews'
+import { Route as AuthenticatedReviewsArchiveRouteImport } from './routes/_authenticated/reviews-archive'
 import { Route as AuthenticatedRosterRouteImport } from './routes/_authenticated/roster'
 import { Route as AuthenticatedShopRouteImport } from './routes/_authenticated/shop'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
@@ -120,6 +121,12 @@ const AuthenticatedReviewsRoute = AuthenticatedReviewsRouteImport.update({
   path: '/reviews',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedReviewsArchiveRoute =
+  AuthenticatedReviewsArchiveRouteImport.update({
+    id: '/reviews-archive',
+    path: '/reviews-archive',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedRosterRoute = AuthenticatedRosterRouteImport.update({
   id: '/roster',
   path: '/roster',
@@ -176,6 +183,7 @@ export interface FileRoutesByFullPath {
   '/profile': typeof AuthenticatedProfileRoute
   '/requests': typeof AuthenticatedRequestsRoute
   '/reviews': typeof AuthenticatedReviewsRoute
+  '/reviews-archive': typeof AuthenticatedReviewsArchiveRoute
   '/roster': typeof AuthenticatedRosterRoute
   '/shop': typeof AuthenticatedShopRoute
   '/tasks': typeof AuthenticatedTasksRoute
@@ -201,6 +209,7 @@ export interface FileRoutesByTo {
   '/profile': typeof AuthenticatedProfileRoute
   '/requests': typeof AuthenticatedRequestsRoute
   '/reviews': typeof AuthenticatedReviewsRoute
+  '/reviews-archive': typeof AuthenticatedReviewsArchiveRoute
   '/roster': typeof AuthenticatedRosterRoute
   '/shop': typeof AuthenticatedShopRoute
   '/tasks': typeof AuthenticatedTasksRoute
@@ -228,6 +237,7 @@ export interface FileRoutesById {
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/requests': typeof AuthenticatedRequestsRoute
   '/_authenticated/reviews': typeof AuthenticatedReviewsRoute
+  '/_authenticated/reviews-archive': typeof AuthenticatedReviewsArchiveRoute
   '/_authenticated/roster': typeof AuthenticatedRosterRoute
   '/_authenticated/shop': typeof AuthenticatedShopRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
@@ -255,6 +265,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/requests'
     | '/reviews'
+    | '/reviews-archive'
     | '/roster'
     | '/shop'
     | '/tasks'
@@ -280,6 +291,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/requests'
     | '/reviews'
+    | '/reviews-archive'
     | '/roster'
     | '/shop'
     | '/tasks'
@@ -306,6 +318,7 @@ export interface FileRouteTypes {
     | '/_authenticated/profile'
     | '/_authenticated/requests'
     | '/_authenticated/reviews'
+    | '/_authenticated/reviews-archive'
     | '/_authenticated/roster'
     | '/_authenticated/shop'
     | '/_authenticated/tasks'
@@ -444,6 +457,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedReviewsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/reviews-archive': {
+      id: '/_authenticated/reviews-archive'
+      path: '/reviews-archive'
+      fullPath: '/reviews-archive'
+      preLoaderRoute: typeof AuthenticatedReviewsArchiveRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/roster': {
       id: '/_authenticated/roster'
       path: '/roster'
@@ -510,6 +530,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedRequestsRoute: typeof AuthenticatedRequestsRoute
   AuthenticatedReviewsRoute: typeof AuthenticatedReviewsRoute
+  AuthenticatedReviewsArchiveRoute: typeof AuthenticatedReviewsArchiveRoute
   AuthenticatedRosterRoute: typeof AuthenticatedRosterRoute
   AuthenticatedShopRoute: typeof AuthenticatedShopRoute
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
@@ -532,6 +553,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedRequestsRoute: AuthenticatedRequestsRoute,
   AuthenticatedReviewsRoute: AuthenticatedReviewsRoute,
+  AuthenticatedReviewsArchiveRoute: AuthenticatedReviewsArchiveRoute,
   AuthenticatedRosterRoute: AuthenticatedRosterRoute,
   AuthenticatedShopRoute: AuthenticatedShopRoute,
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,

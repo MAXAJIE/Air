@@ -260,7 +260,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [lastMarkedPath, setLastMarkedPath] = useState("");
 
   useEffect(() => {
-    if (!notifications || !pathname || pathname === lastMarkedPath) return;
+    if (!notifications || !pathname) return;
+    // Keyed on the unread ids too: a notification that arrives while the user
+    // is already sitting on the target page must still be marked as read.
+    const stamp = `${pathname}|${notifications.map((n) => n.id).join(",")}`;
+    if (stamp === lastMarkedPath) return;
 
     const matchingRoute = Object.values(NOTIF_TO_ROUTE).find((route) =>
       pathname === route || pathname.startsWith(route + "/"),
@@ -268,7 +272,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
     if (matchingRoute) {
       markRouteRead.mutate(matchingRoute);
-      setLastMarkedPath(pathname);
+      setLastMarkedPath(stamp);
     }
   }, [pathname, notifications, lastMarkedPath, markRouteRead]);
 

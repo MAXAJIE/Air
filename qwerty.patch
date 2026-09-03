@@ -1,168 +1,1772 @@
+diff --git a/src/components/app-shell.tsx b/src/components/app-shell.tsx
+index 5277b1b..f2c8b66 100644
+--- a/src/components/app-shell.tsx
++++ b/src/components/app-shell.tsx
+@@ -260,7 +260,11 @@ export function AppShell({ children }: { children: ReactNode }) {
+   const [lastMarkedPath, setLastMarkedPath] = useState("");
+ 
+   useEffect(() => {
+-    if (!notifications || !pathname || pathname === lastMarkedPath) return;
++    if (!notifications || !pathname) return;
++    // Keyed on the unread ids too: a notification that arrives while the user
++    // is already sitting on the target page must still be marked as read.
++    const stamp = `${pathname}|${notifications.map((n) => n.id).join(",")}`;
++    if (stamp === lastMarkedPath) return;
+ 
+     const matchingRoute = Object.values(NOTIF_TO_ROUTE).find((route) =>
+       pathname === route || pathname.startsWith(route + "/"),
+@@ -268,7 +272,7 @@ export function AppShell({ children }: { children: ReactNode }) {
+ 
+     if (matchingRoute) {
+       markRouteRead.mutate(matchingRoute);
+-      setLastMarkedPath(pathname);
++      setLastMarkedPath(stamp);
+     }
+   }, [pathname, notifications, lastMarkedPath, markRouteRead]);
+ 
+diff --git a/src/components/photo-picker.tsx b/src/components/photo-picker.tsx
+index 4e3d4df..0192b8f 100644
+--- a/src/components/photo-picker.tsx
++++ b/src/components/photo-picker.tsx
+@@ -1,29 +1,37 @@
+ import { useMutation } from "@tanstack/react-query";
+ import { ImagePlus, Loader2, X } from "lucide-react";
+-import { useRef } from "react";
++import { useRef, useState } from "react";
+ import { toast } from "sonner";
+ 
++import { ImageCropDialog } from "@/components/image-crop-dialog";
+ import { SignedPhoto } from "@/components/signed-photo";
+ import { Button } from "@/components/ui/button";
+ import { fileToBase64 } from "@/lib/files";
+ import { uploadPhoto } from "@/lib/photos.functions";
+ import { cn } from "@/lib/utils";
+ 
+-/** Drop-in image field: uploads to private storage and hands back the object path. */
++/**
++ * Drop-in image field: opens a square/rectangular cropper matching the display
++ * area, then uploads to private storage and hands back the object path.
++ */
+ export function PhotoPicker({
+   value,
+   onChange,
+   folder,
+   label,
+   className,
++  /** width / height of the area this image is displayed in. */
++  aspect = 3 / 2,
+ }: {
+   value: string | null;
+   onChange: (path: string | null) => void;
+   folder: string;
+   label: string;
+   className?: string;
++  aspect?: number;
+ }) {
+   const inputRef = useRef<HTMLInputElement>(null);
++  const [pending, setPending] = useState<File | null>(null);
+ 
+   const upload = useMutation({
+     mutationFn: async (file: File) => {
+@@ -34,7 +42,10 @@ export function PhotoPicker({
+       });
+       return result.path;
+     },
+-    onSuccess: (path) => onChange(path),
++    onSuccess: (path) => {
++      setPending(null);
++      onChange(path);
++    },
+     onError: (e) => toast.error(e instanceof Error ? e.message : "Upload failed"),
+   });
+ 
+@@ -84,9 +95,23 @@ export function PhotoPicker({
+         onChange={(e) => {
+           const file = e.target.files?.[0];
+           e.target.value = "";
+-          if (file) upload.mutate(file);
++          if (!file) return;
++          if (file.size > 8 * 1024 * 1024) {
++            toast.error("Image must be under 8 MB");
++            return;
++          }
++          setPending(file);
+         }}
+       />
++
++      {/* Position the picture inside the frame it will be shown in. */}
++      <ImageCropDialog
++        file={pending}
++        aspect={aspect}
++        busy={upload.isPending}
++        onCancel={() => setPending(null)}
++        onCropped={(cropped) => upload.mutate(cropped)}
++      />
+     </div>
+   );
+ }
 diff --git a/src/i18n/translations.ts b/src/i18n/translations.ts
-index 8eb9860..703b952 100644
+index 703b952..5908995 100644
 --- a/src/i18n/translations.ts
 +++ b/src/i18n/translations.ts
-@@ -53,6 +53,25 @@ const en = {
-   "reviews.cleanedBy": "Cleaned by",
-   "reviews.unknownCleaner": "Unassigned",
-   "reviews.room": "Room",
-+  "reviews.tabReviews": "Reviews",
-+  "reviews.tabComplaints": "Complaints",
-+  "reviews.openComplaints": "Open",
-+  "reviews.resolvedComplaints": "Resolved",
-+  "reviews.resolve": "Mark resolved",
-+  "reviews.reopen": "Reopen",
-+  "reviews.resolved": "Resolved",
-+  "reviews.resolvedBy": "Resolved by",
-+  "reviews.resolveNote": "Resolution note (optional)",
-+  "reviews.resolveSaved": "Complaint marked resolved.",
-+  "reviews.reopenSaved": "Complaint reopened.",
-+  "reviews.resolvedEmpty": "No resolved complaints yet.",
-+
-+  "landing.navGuest": "Guests",
-+  "landing.guestTitle": "Staying at a Keyward property?",
-+  "landing.guestBody":
-+    "No app, no account. Enter the stay code from your welcome card to check amenities, report a problem or order extras.",
-+  "landing.guestCode": "Stay code",
-+  "landing.guestCta": "Open guest page",
- 
-   "activity.title": "Activity",
-   "activity.subtitle": "Everything you and your team have done, newest first",
-@@ -700,6 +719,23 @@ const zhHans: Partial<Dict> = {
-   "reviews.cleanedBy": "清洁人员",
-   "reviews.unknownCleaner": "未指派",
-   "reviews.room": "房间",
-+  "reviews.tabReviews": "评价",
-+  "reviews.tabComplaints": "投诉",
-+  "reviews.openComplaints": "待处理",
-+  "reviews.resolvedComplaints": "已处理",
-+  "reviews.resolve": "标记为已处理",
-+  "reviews.reopen": "重新打开",
-+  "reviews.resolved": "已处理",
-+  "reviews.resolvedBy": "处理人",
-+  "reviews.resolveNote": "处理说明（选填）",
-+  "reviews.resolveSaved": "投诉已标记为处理完成。",
-+  "reviews.reopenSaved": "投诉已重新打开。",
-+  "reviews.resolvedEmpty": "暂无已处理的投诉。",
-+  "landing.navGuest": "住客入口",
-+  "landing.guestTitle": "正在入住 Keyward 房源？",
-+  "landing.guestBody": "无需下载、无需注册。输入欢迎卡上的入住代码，即可核对用品、反馈问题或加购物品。",
-+  "landing.guestCode": "入住代码",
-+  "landing.guestCta": "进入住客页面",
-   "clean.jobsMirrored": "每个已排期的清洁也会出现在任务中，并标记为清洁任务。",
-   "clean.viewAll": "查看全部任务",
-   "clean.historyTitle": "清洁任务历史",
-@@ -1220,6 +1256,23 @@ const zhHant: Partial<Dict> = {
-   "reviews.cleanedBy": "清潔人員",
-   "reviews.unknownCleaner": "未指派",
-   "reviews.room": "房間",
-+  "reviews.tabReviews": "評價",
-+  "reviews.tabComplaints": "投訴",
-+  "reviews.openComplaints": "待處理",
-+  "reviews.resolvedComplaints": "已處理",
-+  "reviews.resolve": "標記為已處理",
-+  "reviews.reopen": "重新開啟",
-+  "reviews.resolved": "已處理",
-+  "reviews.resolvedBy": "處理人",
-+  "reviews.resolveNote": "處理說明（選填）",
-+  "reviews.resolveSaved": "投訴已標記為處理完成。",
-+  "reviews.reopenSaved": "投訴已重新開啟。",
-+  "reviews.resolvedEmpty": "目前沒有已處理的投訴。",
-+  "landing.navGuest": "住客入口",
-+  "landing.guestTitle": "正在入住 Keyward 房源？",
-+  "landing.guestBody": "無需下載、無需註冊。輸入歡迎卡上的入住代碼，即可核對備品、回報問題或加購物品。",
-+  "landing.guestCode": "入住代碼",
-+  "landing.guestCta": "進入住客頁面",
-   "nav.activity": "活動記錄",
-   "nav.reviews": "評價",
-   "activity.title": "活動記錄",
+@@ -57,6 +57,30 @@ const en = {
+   "reviews.tabComplaints": "Complaints",
+   "reviews.openComplaints": "Open",
+   "reviews.resolvedComplaints": "Resolved",
++  "reviews.notReported": "not reported",
++  "reviews.viewMore": "View more",
++  "reviews.archiveTitle": "Resolved complaints",
++  "reviews.archiveSubtitle": "Everything that has been closed out.",
++  "reviews.archiveEmpty": "No resolved complaints match these filters.",
++  "reviews.filterAll": "All",
++  "reviews.filterProperty": "Property",
++  "reviews.filterCleaner": "Cleaner",
++  "reviews.filterStars": "Rating",
++  "reviews.filterAmenity": "Amenities",
++  "reviews.amenityProblem": "With missing amenities",
++  "reviews.amenityFine": "No amenity problem",
++  "reviews.noRating": "No rating",
++  "crop.title": "Position the picture",
++  "crop.help": "Drag and zoom to choose what is shown in the display area.",
++  "crop.apply": "Use this crop",
++  "profile.clearTitle": "Clear history",
++  "profile.clearHelp": "Archived records stop showing in lists. Nothing is deleted from reports.",
++  "profile.clearComplaints": "Clear complaints history",
++  "profile.clearCleaning": "Clear finished cleaning jobs",
++  "profile.clearTasks": "Clear tasks marked as done",
++  "profile.clearAll": "Clear all history",
++  "profile.clearConfirm": "Clear this history?",
++  "profile.cleared": "History cleared",
+   "reviews.resolve": "Mark resolved",
+   "reviews.reopen": "Reopen",
+   "reviews.resolved": "Resolved",
+@@ -723,6 +747,30 @@ const zhHans: Partial<Dict> = {
+   "reviews.tabComplaints": "投诉",
+   "reviews.openComplaints": "待处理",
+   "reviews.resolvedComplaints": "已处理",
++  "reviews.notReported": "未填写",
++  "reviews.viewMore": "查看更多",
++  "reviews.archiveTitle": "已处理的投诉",
++  "reviews.archiveSubtitle": "所有已结案的投诉记录。",
++  "reviews.archiveEmpty": "没有符合筛选条件的投诉。",
++  "reviews.filterAll": "全部",
++  "reviews.filterProperty": "房源",
++  "reviews.filterCleaner": "清洁人员",
++  "reviews.filterStars": "评分",
++  "reviews.filterAmenity": "用品",
++  "reviews.amenityProblem": "有缺失用品",
++  "reviews.amenityFine": "用品无问题",
++  "reviews.noRating": "无评分",
++  "crop.title": "调整图片位置",
++  "crop.help": "拖动并缩放，选择显示区域内要展示的部分。",
++  "crop.apply": "使用此裁剪",
++  "profile.clearTitle": "清除历史",
++  "profile.clearHelp": "已归档的记录不再显示在列表中，报表数据不会被删除。",
++  "profile.clearComplaints": "清除投诉历史",
++  "profile.clearCleaning": "清除已完成的清洁任务",
++  "profile.clearTasks": "清除已标记完成的任务",
++  "profile.clearAll": "清除全部历史",
++  "profile.clearConfirm": "确认清除这些历史记录？",
++  "profile.cleared": "历史已清除",
+   "reviews.resolve": "标记为已处理",
+   "reviews.reopen": "重新打开",
+   "reviews.resolved": "已处理",
+@@ -1260,6 +1308,30 @@ const zhHant: Partial<Dict> = {
+   "reviews.tabComplaints": "投訴",
+   "reviews.openComplaints": "待處理",
+   "reviews.resolvedComplaints": "已處理",
++  "reviews.notReported": "未填寫",
++  "reviews.viewMore": "查看更多",
++  "reviews.archiveTitle": "已處理的投訴",
++  "reviews.archiveSubtitle": "所有已結案的投訴紀錄。",
++  "reviews.archiveEmpty": "沒有符合篩選條件的投訴。",
++  "reviews.filterAll": "全部",
++  "reviews.filterProperty": "房源",
++  "reviews.filterCleaner": "清潔人員",
++  "reviews.filterStars": "評分",
++  "reviews.filterAmenity": "備品",
++  "reviews.amenityProblem": "有缺少備品",
++  "reviews.amenityFine": "備品無問題",
++  "reviews.noRating": "無評分",
++  "crop.title": "調整圖片位置",
++  "crop.help": "拖曳並縮放，選擇顯示區域內要呈現的部分。",
++  "crop.apply": "使用此裁切",
++  "profile.clearTitle": "清除歷史",
++  "profile.clearHelp": "已封存的紀錄不再顯示於清單，報表資料不會刪除。",
++  "profile.clearComplaints": "清除投訴歷史",
++  "profile.clearCleaning": "清除已完成的清潔工作",
++  "profile.clearTasks": "清除已標記完成的任務",
++  "profile.clearAll": "清除全部歷史",
++  "profile.clearConfirm": "確認清除這些歷史紀錄？",
++  "profile.cleared": "歷史已清除",
+   "reviews.resolve": "標記為已處理",
+   "reviews.reopen": "重新開啟",
+   "reviews.resolved": "已處理",
 diff --git a/src/integrations/supabase/types.ts b/src/integrations/supabase/types.ts
-index 6f411eb..eb063b3 100644
+index eb063b3..79233bb 100644
 --- a/src/integrations/supabase/types.ts
 +++ b/src/integrations/supabase/types.ts
-@@ -296,6 +296,41 @@ export type Database = {
-           },
-         ]
-       }
-+      complaint_resolutions: {
-+        Row: {
-+          complaint_key: string
-+          id: string
-+          property_id: string
-+          resolution_note: string | null
-+          resolved_at: string
-+          resolved_by: string
-+        }
-+        Insert: {
-+          complaint_key: string
-+          id?: string
-+          property_id: string
-+          resolution_note?: string | null
-+          resolved_at?: string
-+          resolved_by: string
-+        }
-+        Update: {
-+          complaint_key?: string
-+          id?: string
-+          property_id?: string
-+          resolution_note?: string | null
-+          resolved_at?: string
-+          resolved_by?: string
-+        }
-+        Relationships: [
-+          {
-+            foreignKeyName: "complaint_resolutions_property_id_fkey"
-+            columns: ["property_id"]
-+            isOneToOne: false
-+            referencedRelation: "properties"
-+            referencedColumns: ["id"]
-+          },
-+        ]
-+      }
-       cleaning_job_items: {
+@@ -17,6 +17,7 @@ export type Database = {
+       activity_log: {
          Row: {
-           cleaning_job_id: string
-diff --git a/src/routes/_authenticated/reviews.tsx b/src/routes/_authenticated/reviews.tsx
-index 6959716..f511c97 100644
---- a/src/routes/_authenticated/reviews.tsx
-+++ b/src/routes/_authenticated/reviews.tsx
-@@ -1,10 +1,28 @@
--import { useQuery, useQueryClient } from "@tanstack/react-query";
-+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
- import { Navigate, createFileRoute, useLocation } from "@tanstack/react-router";
--import { AlertTriangle, Building2, PackageMinus, Star, UserRound } from "lucide-react";
--import { useEffect, useMemo, useRef } from "react";
-+import {
-+  AlertTriangle,
-+  Building2,
-+  CheckCircle2,
-+  PackageMinus,
-+  RotateCcw,
-+  Star,
-+  UserRound,
-+} from "lucide-react";
-+import { useEffect, useMemo, useRef, useState } from "react";
-+import { toast } from "sonner";
+           action: string
++          actor_role: string | null
+           actor_user_id: string | null
+           created_at: string
+           entity_id: string | null
+@@ -27,6 +28,7 @@ export type Database = {
+         }
+         Insert: {
+           action: string
++          actor_role?: string | null
+           actor_user_id?: string | null
+           created_at?: string
+           entity_id?: string | null
+@@ -37,6 +39,7 @@ export type Database = {
+         }
+         Update: {
+           action?: string
++          actor_role?: string | null
+           actor_user_id?: string | null
+           created_at?: string
+           entity_id?: string | null
+@@ -1356,6 +1359,7 @@ export type Database = {
+         Returns: number
+       }
+       can_view_pii: { Args: { _user: string }; Returns: boolean }
++      clear_history: { Args: { p_group: string; p_scope: string }; Returns: number }
+       delete_payment_qr: { Args: { p_group: string }; Returns: undefined }
+       email_for_username: { Args: { p_username: string }; Returns: string }
+       get_payment_qr: { Args: { p_group: string }; Returns: Json }
+diff --git a/src/routeTree.gen.ts b/src/routeTree.gen.ts
+index f30e57d..3341882 100644
+--- a/src/routeTree.gen.ts
++++ b/src/routeTree.gen.ts
+@@ -9,94 +9,90 @@
+ // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
  
- import { ListSkeleton, PageHeader, StatCard, StatsSkeleton } from "@/components/app-shell";
+ import { Route as rootRouteImport } from './routes/__root'
+-import { Route as IndexRouteImport } from './routes/index'
+-import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+-import { Route as AuthRouteImport } from './routes/auth'
+ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+-import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
+-import { Route as AuthenticatedAgenciesRouteImport } from './routes/_authenticated/agencies'
+-import { Route as AuthenticatedCleaningRouteImport } from './routes/_authenticated/cleaning'
+-import { Route as AuthenticatedCleaningHistoryRouteImport } from './routes/_authenticated/cleaning-history'
+-import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+-import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
+-import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
+-import { Route as AuthenticatedJobsRouteImport } from './routes/_authenticated/jobs'
+-import { Route as AuthenticatedPeopleRouteImport } from './routes/_authenticated/people'
+-import { Route as AuthenticatedPerformanceRouteImport } from './routes/_authenticated/performance'
+-import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
+-import { Route as AuthenticatedRequestsRouteImport } from './routes/_authenticated/requests'
+-import { Route as AuthenticatedReviewsRouteImport } from './routes/_authenticated/reviews'
+-import { Route as AuthenticatedRosterRouteImport } from './routes/_authenticated/roster'
+-import { Route as AuthenticatedShopRouteImport } from './routes/_authenticated/shop'
+-import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
++import { Route as AuthRouteImport } from './routes/auth'
++import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
++import { Route as IndexRouteImport } from './routes/index'
+ import { Route as GCodeRouteImport } from './routes/g.$code'
+-import { Route as AuthenticatedOnboardingRoleRouteImport } from './routes/_authenticated/onboarding/role'
++import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated/tasks'
++import { Route as AuthenticatedShopRouteImport } from './routes/_authenticated/shop'
++import { Route as AuthenticatedRosterRouteImport } from './routes/_authenticated/roster'
++import { Route as AuthenticatedReviewsArchiveRouteImport } from './routes/_authenticated/reviews-archive'
++import { Route as AuthenticatedReviewsRouteImport } from './routes/_authenticated/reviews'
++import { Route as AuthenticatedRequestsRouteImport } from './routes/_authenticated/requests'
++import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated/profile'
++import { Route as AuthenticatedPerformanceRouteImport } from './routes/_authenticated/performance'
++import { Route as AuthenticatedPeopleRouteImport } from './routes/_authenticated/people'
++import { Route as AuthenticatedJobsRouteImport } from './routes/_authenticated/jobs'
++import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
++import { Route as AuthenticatedHistoryRouteImport } from './routes/_authenticated/history'
++import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
++import { Route as AuthenticatedCleaningHistoryRouteImport } from './routes/_authenticated/cleaning-history'
++import { Route as AuthenticatedCleaningRouteImport } from './routes/_authenticated/cleaning'
++import { Route as AuthenticatedAgenciesRouteImport } from './routes/_authenticated/agencies'
++import { Route as AuthenticatedActivityRouteImport } from './routes/_authenticated/activity'
+ import { Route as AuthenticatedPropertiesIndexRouteImport } from './routes/_authenticated/properties.index'
+ import { Route as AuthenticatedPropertiesPropertyIdRouteImport } from './routes/_authenticated/properties.$propertyId'
++import { Route as AuthenticatedOnboardingRoleRouteImport } from './routes/_authenticated/onboarding/role'
+ 
+-const IndexRoute = IndexRouteImport.update({
+-  id: '/',
+-  path: '/',
++const ResetPasswordRoute = ResetPasswordRouteImport.update({
++  id: '/reset-password',
++  path: '/reset-password',
++  getParentRoute: () => rootRouteImport,
++} as any)
++const AuthRoute = AuthRouteImport.update({
++  id: '/auth',
++  path: '/auth',
+   getParentRoute: () => rootRouteImport,
+ } as any)
+ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+   id: '/_authenticated',
+   getParentRoute: () => rootRouteImport,
+ } as any)
+-const AuthRoute = AuthRouteImport.update({
+-  id: '/auth',
+-  path: '/auth',
++const IndexRoute = IndexRouteImport.update({
++  id: '/',
++  path: '/',
+   getParentRoute: () => rootRouteImport,
+ } as any)
+-const ResetPasswordRoute = ResetPasswordRouteImport.update({
+-  id: '/reset-password',
+-  path: '/reset-password',
++const GCodeRoute = GCodeRouteImport.update({
++  id: '/g/$code',
++  path: '/g/$code',
+   getParentRoute: () => rootRouteImport,
+ } as any)
+-const AuthenticatedActivityRoute = AuthenticatedActivityRouteImport.update({
+-  id: '/activity',
+-  path: '/activity',
++const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
++  id: '/tasks',
++  path: '/tasks',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedAgenciesRoute = AuthenticatedAgenciesRouteImport.update({
+-  id: '/agencies',
+-  path: '/agencies',
++const AuthenticatedShopRoute = AuthenticatedShopRouteImport.update({
++  id: '/shop',
++  path: '/shop',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedCleaningRoute = AuthenticatedCleaningRouteImport.update({
+-  id: '/cleaning',
+-  path: '/cleaning',
++const AuthenticatedRosterRoute = AuthenticatedRosterRouteImport.update({
++  id: '/roster',
++  path: '/roster',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedCleaningHistoryRoute =
+-  AuthenticatedCleaningHistoryRouteImport.update({
+-    id: '/cleaning-history',
+-    path: '/cleaning-history',
++const AuthenticatedReviewsArchiveRoute =
++  AuthenticatedReviewsArchiveRouteImport.update({
++    id: '/reviews-archive',
++    path: '/reviews-archive',
+     getParentRoute: () => AuthenticatedRouteRoute,
+   } as any)
+-const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
+-  id: '/dashboard',
+-  path: '/dashboard',
+-  getParentRoute: () => AuthenticatedRouteRoute,
+-} as any)
+-const AuthenticatedHistoryRoute = AuthenticatedHistoryRouteImport.update({
+-  id: '/history',
+-  path: '/history',
+-  getParentRoute: () => AuthenticatedRouteRoute,
+-} as any)
+-const AuthenticatedInboxRoute = AuthenticatedInboxRouteImport.update({
+-  id: '/inbox',
+-  path: '/inbox',
++const AuthenticatedReviewsRoute = AuthenticatedReviewsRouteImport.update({
++  id: '/reviews',
++  path: '/reviews',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedJobsRoute = AuthenticatedJobsRouteImport.update({
+-  id: '/jobs',
+-  path: '/jobs',
++const AuthenticatedRequestsRoute = AuthenticatedRequestsRouteImport.update({
++  id: '/requests',
++  path: '/requests',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedPeopleRoute = AuthenticatedPeopleRouteImport.update({
+-  id: '/people',
+-  path: '/people',
++const AuthenticatedProfileRoute = AuthenticatedProfileRouteImport.update({
++  id: '/profile',
++  path: '/profile',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+ const AuthenticatedPerformanceRoute =
+@@ -105,47 +101,52 @@ const AuthenticatedPerformanceRoute =
+     path: '/performance',
+     getParentRoute: () => AuthenticatedRouteRoute,
+   } as any)
+-const AuthenticatedProfileRoute = AuthenticatedProfileRouteImport.update({
+-  id: '/profile',
+-  path: '/profile',
++const AuthenticatedPeopleRoute = AuthenticatedPeopleRouteImport.update({
++  id: '/people',
++  path: '/people',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedRequestsRoute = AuthenticatedRequestsRouteImport.update({
+-  id: '/requests',
+-  path: '/requests',
++const AuthenticatedJobsRoute = AuthenticatedJobsRouteImport.update({
++  id: '/jobs',
++  path: '/jobs',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedReviewsRoute = AuthenticatedReviewsRouteImport.update({
+-  id: '/reviews',
+-  path: '/reviews',
++const AuthenticatedInboxRoute = AuthenticatedInboxRouteImport.update({
++  id: '/inbox',
++  path: '/inbox',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedRosterRoute = AuthenticatedRosterRouteImport.update({
+-  id: '/roster',
+-  path: '/roster',
++const AuthenticatedHistoryRoute = AuthenticatedHistoryRouteImport.update({
++  id: '/history',
++  path: '/history',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedShopRoute = AuthenticatedShopRouteImport.update({
+-  id: '/shop',
+-  path: '/shop',
++const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
++  id: '/dashboard',
++  path: '/dashboard',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
+-  id: '/tasks',
+-  path: '/tasks',
++const AuthenticatedCleaningHistoryRoute =
++  AuthenticatedCleaningHistoryRouteImport.update({
++    id: '/cleaning-history',
++    path: '/cleaning-history',
++    getParentRoute: () => AuthenticatedRouteRoute,
++  } as any)
++const AuthenticatedCleaningRoute = AuthenticatedCleaningRouteImport.update({
++  id: '/cleaning',
++  path: '/cleaning',
+   getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const GCodeRoute = GCodeRouteImport.update({
+-  id: '/g/$code',
+-  path: '/g/$code',
+-  getParentRoute: () => rootRouteImport,
++const AuthenticatedAgenciesRoute = AuthenticatedAgenciesRouteImport.update({
++  id: '/agencies',
++  path: '/agencies',
++  getParentRoute: () => AuthenticatedRouteRoute,
++} as any)
++const AuthenticatedActivityRoute = AuthenticatedActivityRouteImport.update({
++  id: '/activity',
++  path: '/activity',
++  getParentRoute: () => AuthenticatedRouteRoute,
+ } as any)
+-const AuthenticatedOnboardingRoleRoute =
+-  AuthenticatedOnboardingRoleRouteImport.update({
+-    id: '/onboarding/role',
+-    path: '/onboarding/role',
+-    getParentRoute: () => AuthenticatedRouteRoute,
+-  } as any)
+ const AuthenticatedPropertiesIndexRoute =
+   AuthenticatedPropertiesIndexRouteImport.update({
+     id: '/properties/',
+@@ -158,6 +159,12 @@ const AuthenticatedPropertiesPropertyIdRoute =
+     path: '/properties/$propertyId',
+     getParentRoute: () => AuthenticatedRouteRoute,
+   } as any)
++const AuthenticatedOnboardingRoleRoute =
++  AuthenticatedOnboardingRoleRouteImport.update({
++    id: '/onboarding/role',
++    path: '/onboarding/role',
++    getParentRoute: () => AuthenticatedRouteRoute,
++  } as any)
+ 
+ export interface FileRoutesByFullPath {
+   '/': typeof IndexRoute
+@@ -176,6 +183,7 @@ export interface FileRoutesByFullPath {
+   '/profile': typeof AuthenticatedProfileRoute
+   '/requests': typeof AuthenticatedRequestsRoute
+   '/reviews': typeof AuthenticatedReviewsRoute
++  '/reviews-archive': typeof AuthenticatedReviewsArchiveRoute
+   '/roster': typeof AuthenticatedRosterRoute
+   '/shop': typeof AuthenticatedShopRoute
+   '/tasks': typeof AuthenticatedTasksRoute
+@@ -201,6 +209,7 @@ export interface FileRoutesByTo {
+   '/profile': typeof AuthenticatedProfileRoute
+   '/requests': typeof AuthenticatedRequestsRoute
+   '/reviews': typeof AuthenticatedReviewsRoute
++  '/reviews-archive': typeof AuthenticatedReviewsArchiveRoute
+   '/roster': typeof AuthenticatedRosterRoute
+   '/shop': typeof AuthenticatedShopRoute
+   '/tasks': typeof AuthenticatedTasksRoute
+@@ -228,6 +237,7 @@ export interface FileRoutesById {
+   '/_authenticated/profile': typeof AuthenticatedProfileRoute
+   '/_authenticated/requests': typeof AuthenticatedRequestsRoute
+   '/_authenticated/reviews': typeof AuthenticatedReviewsRoute
++  '/_authenticated/reviews-archive': typeof AuthenticatedReviewsArchiveRoute
+   '/_authenticated/roster': typeof AuthenticatedRosterRoute
+   '/_authenticated/shop': typeof AuthenticatedShopRoute
+   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
+@@ -255,6 +265,7 @@ export interface FileRouteTypes {
+     | '/profile'
+     | '/requests'
+     | '/reviews'
++    | '/reviews-archive'
+     | '/roster'
+     | '/shop'
+     | '/tasks'
+@@ -280,6 +291,7 @@ export interface FileRouteTypes {
+     | '/profile'
+     | '/requests'
+     | '/reviews'
++    | '/reviews-archive'
+     | '/roster'
+     | '/shop'
+     | '/tasks'
+@@ -306,6 +318,7 @@ export interface FileRouteTypes {
+     | '/_authenticated/profile'
+     | '/_authenticated/requests'
+     | '/_authenticated/reviews'
++    | '/_authenticated/reviews-archive'
+     | '/_authenticated/roster'
+     | '/_authenticated/shop'
+     | '/_authenticated/tasks'
+@@ -325,11 +338,18 @@ export interface RootRouteChildren {
+ 
+ declare module '@tanstack/react-router' {
+   interface FileRoutesByPath {
+-    '/': {
+-      id: '/'
+-      path: '/'
+-      fullPath: '/'
+-      preLoaderRoute: typeof IndexRouteImport
++    '/reset-password': {
++      id: '/reset-password'
++      path: '/reset-password'
++      fullPath: '/reset-password'
++      preLoaderRoute: typeof ResetPasswordRouteImport
++      parentRoute: typeof rootRouteImport
++    }
++    '/auth': {
++      id: '/auth'
++      path: '/auth'
++      fullPath: '/auth'
++      preLoaderRoute: typeof AuthRouteImport
+       parentRoute: typeof rootRouteImport
+     }
+     '/_authenticated': {
+@@ -339,74 +359,74 @@ declare module '@tanstack/react-router' {
+       preLoaderRoute: typeof AuthenticatedRouteRouteImport
+       parentRoute: typeof rootRouteImport
+     }
+-    '/auth': {
+-      id: '/auth'
+-      path: '/auth'
+-      fullPath: '/auth'
+-      preLoaderRoute: typeof AuthRouteImport
++    '/': {
++      id: '/'
++      path: '/'
++      fullPath: '/'
++      preLoaderRoute: typeof IndexRouteImport
+       parentRoute: typeof rootRouteImport
+     }
+-    '/reset-password': {
+-      id: '/reset-password'
+-      path: '/reset-password'
+-      fullPath: '/reset-password'
+-      preLoaderRoute: typeof ResetPasswordRouteImport
++    '/g/$code': {
++      id: '/g/$code'
++      path: '/g/$code'
++      fullPath: '/g/$code'
++      preLoaderRoute: typeof GCodeRouteImport
+       parentRoute: typeof rootRouteImport
+     }
+-    '/_authenticated/activity': {
+-      id: '/_authenticated/activity'
+-      path: '/activity'
+-      fullPath: '/activity'
+-      preLoaderRoute: typeof AuthenticatedActivityRouteImport
++    '/_authenticated/tasks': {
++      id: '/_authenticated/tasks'
++      path: '/tasks'
++      fullPath: '/tasks'
++      preLoaderRoute: typeof AuthenticatedTasksRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/agencies': {
+-      id: '/_authenticated/agencies'
+-      path: '/agencies'
+-      fullPath: '/agencies'
+-      preLoaderRoute: typeof AuthenticatedAgenciesRouteImport
++    '/_authenticated/shop': {
++      id: '/_authenticated/shop'
++      path: '/shop'
++      fullPath: '/shop'
++      preLoaderRoute: typeof AuthenticatedShopRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/cleaning': {
+-      id: '/_authenticated/cleaning'
+-      path: '/cleaning'
+-      fullPath: '/cleaning'
+-      preLoaderRoute: typeof AuthenticatedCleaningRouteImport
++    '/_authenticated/roster': {
++      id: '/_authenticated/roster'
++      path: '/roster'
++      fullPath: '/roster'
++      preLoaderRoute: typeof AuthenticatedRosterRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/cleaning-history': {
+-      id: '/_authenticated/cleaning-history'
+-      path: '/cleaning-history'
+-      fullPath: '/cleaning-history'
+-      preLoaderRoute: typeof AuthenticatedCleaningHistoryRouteImport
++    '/_authenticated/reviews-archive': {
++      id: '/_authenticated/reviews-archive'
++      path: '/reviews-archive'
++      fullPath: '/reviews-archive'
++      preLoaderRoute: typeof AuthenticatedReviewsArchiveRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/dashboard': {
+-      id: '/_authenticated/dashboard'
+-      path: '/dashboard'
+-      fullPath: '/dashboard'
+-      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
++    '/_authenticated/reviews': {
++      id: '/_authenticated/reviews'
++      path: '/reviews'
++      fullPath: '/reviews'
++      preLoaderRoute: typeof AuthenticatedReviewsRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/history': {
+-      id: '/_authenticated/history'
+-      path: '/history'
+-      fullPath: '/history'
+-      preLoaderRoute: typeof AuthenticatedHistoryRouteImport
++    '/_authenticated/requests': {
++      id: '/_authenticated/requests'
++      path: '/requests'
++      fullPath: '/requests'
++      preLoaderRoute: typeof AuthenticatedRequestsRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/inbox': {
+-      id: '/_authenticated/inbox'
+-      path: '/inbox'
+-      fullPath: '/inbox'
+-      preLoaderRoute: typeof AuthenticatedInboxRouteImport
++    '/_authenticated/profile': {
++      id: '/_authenticated/profile'
++      path: '/profile'
++      fullPath: '/profile'
++      preLoaderRoute: typeof AuthenticatedProfileRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/jobs': {
+-      id: '/_authenticated/jobs'
+-      path: '/jobs'
+-      fullPath: '/jobs'
+-      preLoaderRoute: typeof AuthenticatedJobsRouteImport
++    '/_authenticated/performance': {
++      id: '/_authenticated/performance'
++      path: '/performance'
++      fullPath: '/performance'
++      preLoaderRoute: typeof AuthenticatedPerformanceRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+     '/_authenticated/people': {
+@@ -416,67 +436,60 @@ declare module '@tanstack/react-router' {
+       preLoaderRoute: typeof AuthenticatedPeopleRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/performance': {
+-      id: '/_authenticated/performance'
+-      path: '/performance'
+-      fullPath: '/performance'
+-      preLoaderRoute: typeof AuthenticatedPerformanceRouteImport
++    '/_authenticated/jobs': {
++      id: '/_authenticated/jobs'
++      path: '/jobs'
++      fullPath: '/jobs'
++      preLoaderRoute: typeof AuthenticatedJobsRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/profile': {
+-      id: '/_authenticated/profile'
+-      path: '/profile'
+-      fullPath: '/profile'
+-      preLoaderRoute: typeof AuthenticatedProfileRouteImport
++    '/_authenticated/inbox': {
++      id: '/_authenticated/inbox'
++      path: '/inbox'
++      fullPath: '/inbox'
++      preLoaderRoute: typeof AuthenticatedInboxRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/requests': {
+-      id: '/_authenticated/requests'
+-      path: '/requests'
+-      fullPath: '/requests'
+-      preLoaderRoute: typeof AuthenticatedRequestsRouteImport
++    '/_authenticated/history': {
++      id: '/_authenticated/history'
++      path: '/history'
++      fullPath: '/history'
++      preLoaderRoute: typeof AuthenticatedHistoryRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/reviews': {
+-      id: '/_authenticated/reviews'
+-      path: '/reviews'
+-      fullPath: '/reviews'
+-      preLoaderRoute: typeof AuthenticatedReviewsRouteImport
++    '/_authenticated/dashboard': {
++      id: '/_authenticated/dashboard'
++      path: '/dashboard'
++      fullPath: '/dashboard'
++      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/roster': {
+-      id: '/_authenticated/roster'
+-      path: '/roster'
+-      fullPath: '/roster'
+-      preLoaderRoute: typeof AuthenticatedRosterRouteImport
++    '/_authenticated/cleaning-history': {
++      id: '/_authenticated/cleaning-history'
++      path: '/cleaning-history'
++      fullPath: '/cleaning-history'
++      preLoaderRoute: typeof AuthenticatedCleaningHistoryRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/shop': {
+-      id: '/_authenticated/shop'
+-      path: '/shop'
+-      fullPath: '/shop'
+-      preLoaderRoute: typeof AuthenticatedShopRouteImport
++    '/_authenticated/cleaning': {
++      id: '/_authenticated/cleaning'
++      path: '/cleaning'
++      fullPath: '/cleaning'
++      preLoaderRoute: typeof AuthenticatedCleaningRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/_authenticated/tasks': {
+-      id: '/_authenticated/tasks'
+-      path: '/tasks'
+-      fullPath: '/tasks'
+-      preLoaderRoute: typeof AuthenticatedTasksRouteImport
++    '/_authenticated/agencies': {
++      id: '/_authenticated/agencies'
++      path: '/agencies'
++      fullPath: '/agencies'
++      preLoaderRoute: typeof AuthenticatedAgenciesRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+-    '/g/$code': {
+-      id: '/g/$code'
+-      path: '/g/$code'
+-      fullPath: '/g/$code'
+-      preLoaderRoute: typeof GCodeRouteImport
+-      parentRoute: typeof rootRouteImport
+-    }
+-    '/_authenticated/onboarding/role': {
+-      id: '/_authenticated/onboarding/role'
+-      path: '/onboarding/role'
+-      fullPath: '/onboarding/role'
+-      preLoaderRoute: typeof AuthenticatedOnboardingRoleRouteImport
++    '/_authenticated/activity': {
++      id: '/_authenticated/activity'
++      path: '/activity'
++      fullPath: '/activity'
++      preLoaderRoute: typeof AuthenticatedActivityRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
+     '/_authenticated/properties/': {
+@@ -493,6 +506,13 @@ declare module '@tanstack/react-router' {
+       preLoaderRoute: typeof AuthenticatedPropertiesPropertyIdRouteImport
+       parentRoute: typeof AuthenticatedRouteRoute
+     }
++    '/_authenticated/onboarding/role': {
++      id: '/_authenticated/onboarding/role'
++      path: '/onboarding/role'
++      fullPath: '/onboarding/role'
++      preLoaderRoute: typeof AuthenticatedOnboardingRoleRouteImport
++      parentRoute: typeof AuthenticatedRouteRoute
++    }
+   }
+ }
+ 
+@@ -510,6 +530,7 @@ interface AuthenticatedRouteRouteChildren {
+   AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
+   AuthenticatedRequestsRoute: typeof AuthenticatedRequestsRoute
+   AuthenticatedReviewsRoute: typeof AuthenticatedReviewsRoute
++  AuthenticatedReviewsArchiveRoute: typeof AuthenticatedReviewsArchiveRoute
+   AuthenticatedRosterRoute: typeof AuthenticatedRosterRoute
+   AuthenticatedShopRoute: typeof AuthenticatedShopRoute
+   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
+@@ -532,6 +553,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+   AuthenticatedProfileRoute: AuthenticatedProfileRoute,
+   AuthenticatedRequestsRoute: AuthenticatedRequestsRoute,
+   AuthenticatedReviewsRoute: AuthenticatedReviewsRoute,
++  AuthenticatedReviewsArchiveRoute: AuthenticatedReviewsArchiveRoute,
+   AuthenticatedRosterRoute: AuthenticatedRosterRoute,
+   AuthenticatedShopRoute: AuthenticatedShopRoute,
+   AuthenticatedTasksRoute: AuthenticatedTasksRoute,
+diff --git a/src/routes/_authenticated/activity.tsx b/src/routes/_authenticated/activity.tsx
+index 20c7920..97898d6 100644
+--- a/src/routes/_authenticated/activity.tsx
++++ b/src/routes/_authenticated/activity.tsx
+@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
+ 
+ import { ListSkeleton, PageHeader } from "@/components/app-shell";
+ import { Button } from "@/components/ui/button";
+-import { useActiveGroup, useAuthUser } from "@/hooks/use-app";
++import { useActiveGroup, useAuthUser, useProfile } from "@/hooks/use-app";
+ import { useT, type TranslationKey } from "@/i18n";
+ import { supabase } from "@/integrations/supabase/client";
+ import { cn } from "@/lib/utils";
+@@ -26,6 +26,7 @@ export const Route = createFileRoute("/_authenticated/activity")({
+ type ActivityRow = {
+   id: string;
+   actor_user_id: string | null;
++  actor_role: string | null;
+   owner_group_id: string | null;
+   action: string;
+   entity_type: string;
+@@ -38,21 +39,28 @@ function ActivityPage() {
+   const qc = useQueryClient();
+   const { data: user } = useAuthUser();
+   const { groupId } = useActiveGroup();
++  const { data: profile } = useProfile();
++  const role = profile?.primary_role ?? null;
+   const [scope, setScope] = useState<"mine" | "all">("mine");
+ 
+   const activityQ = useQuery({
+-    queryKey: ["activity", user?.id, groupId, scope],
++    queryKey: ["activity", user?.id, groupId, scope, role],
+     enabled: !!user?.id,
+     staleTime: 0,
+     refetchInterval: 20_000,
+     queryFn: async () => {
+       let query = supabase
+         .from("activity_log")
+-        .select("id, actor_user_id, owner_group_id, action, entity_type, entity_id, created_at")
++        .select(
++          "id, actor_user_id, actor_role, owner_group_id, action, entity_type, entity_id, created_at",
++        )
+         .order("created_at", { ascending: false })
+         .limit(200);
+       if (scope === "mine") query = query.eq("actor_user_id", user!.id);
+       else if (groupId) query = query.eq("owner_group_id", groupId);
++      // An owner and a cleaning company are different entities: neither one
++      // reads the other's history, even inside the same group.
++      if (scope === "all" && role) query = query.eq("actor_role", role);
+       const { data, error } = await query;
+       if (error) throw error;
+       return (data ?? []) as ActivityRow[];
+diff --git a/src/routes/_authenticated/jobs.tsx b/src/routes/_authenticated/jobs.tsx
+index 798c822..9af604c 100644
+--- a/src/routes/_authenticated/jobs.tsx
++++ b/src/routes/_authenticated/jobs.tsx
+@@ -362,7 +362,7 @@ function ChecklistPanel({ jobId, readOnly }: { jobId: string; readOnly: boolean
+               </span>
+             )}
+           </label>
+-          {!readOnly && (
++          {!readOnly && item.requires_photo && (
+             <div className="mt-2">
+               <PhotoPicker
+                 value={item.photo_url}
+diff --git a/src/routes/_authenticated/profile.tsx b/src/routes/_authenticated/profile.tsx
+index 112c7bd..7596584 100644
+--- a/src/routes/_authenticated/profile.tsx
++++ b/src/routes/_authenticated/profile.tsx
+@@ -1,18 +1,17 @@
+ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+ import { createFileRoute } from "@tanstack/react-router";
+-import { Lock, Mail, Settings, ShieldCheck, UserRound } from "lucide-react";
++import { Lock, Mail, Settings, ShieldCheck, Trash2, UserRound } from "lucide-react";
+ import { useEffect, useState } from "react";
+ import { toast } from "sonner";
+ 
+ import { ListSkeleton, PageHeader } from "@/components/app-shell";
+ import { AvatarCropPicker } from "@/components/avatar-crop-picker";
+ import { PasswordMeter } from "@/components/password-meter";
+-import { PhotoPicker } from "@/components/photo-picker";
  import { SignedPhoto } from "@/components/signed-photo";
-+import {
-+  COVER_HEIGHT,
-+  GRID_COLS,
-+  ViewToggle,
-+  useViewPrefs,
-+  type CardSize,
-+  type ViewMode,
-+} from "@/components/view-toggle";
-+import { Button } from "@/components/ui/button";
- import { useActiveGroup, useProfile } from "@/hooks/use-app";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+ import { Label } from "@/components/ui/label";
+-import { useProfile } from "@/hooks/use-app";
++import { useActiveGroup, useProfile } from "@/hooks/use-app";
  import { useT } from "@/i18n";
  import { supabase } from "@/integrations/supabase/client";
-@@ -61,6 +79,15 @@ type JobRow = {
-   completed_at: string | null;
- };
+ import { scorePassword } from "@/lib/password-strength";
+@@ -151,15 +150,9 @@ function ProfilePreview() {
+         <p className="text-sm">
+           {pii?.completed ? t("profile.complete") : t("profile.incomplete")}
+         </p>
+-        <div className="grid gap-4 md:grid-cols-[minmax(0,200px)_minmax(0,1fr)]">
+-          <div className="space-y-2">
+-            <p className="text-sm text-muted-foreground">{t("profile.selfie")}</p>
+-            <SignedPhoto
+-              path={pii?.selfie_path ?? null}
+-              alt={t("profile.selfie")}
+-              className="h-40 w-full object-cover"
+-            />
+-          </div>
++        {/* The profile picture at the top of this page is the only portrait
++            we keep, so the separate selfie square is gone. */}
++        <div>
+           <dl className="grid gap-3 sm:grid-cols-2">
+             {rows.map(([label, value]) => (
+               <div key={label}>
+@@ -183,6 +176,7 @@ function ProfileEditor({ onDone }: { onDone: () => void }) {
+       <AccountCard onDone={onDone} />
+       <SecurityCard />
+       <PersonalCard onDone={onDone} />
++      <HistoryCard />
+     </div>
+   );
+ }
+@@ -330,6 +324,62 @@ function SecurityCard() {
+   );
+ }
  
-+type ResolutionRow = {
++/** Owner-only housekeeping: archive finished records so lists stay short. */
++function HistoryCard() {
++  const t = useT();
++  const qc = useQueryClient();
++  const { data: profile } = useProfile();
++  const { groupId } = useActiveGroup();
++
++  const clear = useMutation({
++    mutationFn: async (scope: "complaints" | "cleaning" | "tasks" | "all") => {
++      const { error } = await supabase.rpc("clear_history", {
++        p_group: groupId!,
++        p_scope: scope,
++      });
++      if (error) throw error;
++    },
++    onSuccess: async () => {
++      await qc.invalidateQueries();
++      toast.success(t("profile.cleared"));
++    },
++    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
++  });
++
++  if (profile?.primary_role !== "owner" || !groupId) return null;
++
++  const action = (scope: "complaints" | "cleaning" | "tasks" | "all", label: string) => (
++    <Button
++      type="button"
++      variant={scope === "all" ? "destructive" : "outline"}
++      disabled={clear.isPending}
++      onClick={() => {
++        if (window.confirm(t("profile.clearConfirm"))) clear.mutate(scope);
++      }}
++    >
++      {label}
++    </Button>
++  );
++
++  return (
++    <section className="surface space-y-4 p-5 lg:col-span-2">
++      <div>
++        <h2 className="flex items-center gap-2 text-lg">
++          <Trash2 className="h-4 w-4" aria-hidden="true" />
++          {t("profile.clearTitle")}
++        </h2>
++        <p className="text-sm text-muted-foreground">{t("profile.clearHelp")}</p>
++      </div>
++      <div className="flex flex-wrap gap-2">
++        {action("complaints", t("profile.clearComplaints"))}
++        {action("cleaning", t("profile.clearCleaning"))}
++        {action("tasks", t("profile.clearTasks"))}
++        {action("all", t("profile.clearAll"))}
++      </div>
++    </section>
++  );
++}
++
+ function usePii() {
+   const { data: profile } = useProfile();
+   return useQuery({
+@@ -357,7 +407,8 @@ function PersonalCard({ onDone }: { onDone: () => void }) {
+     emergency_name: "",
+     emergency_phone: "",
+   });
+-  const [selfie, setSelfie] = useState<string | null>(null);
++  // Kept so saving personal details never wipes an existing selfie path.
++  const [selfie] = useState<string | null>(null);
+   const [hydrated, setHydrated] = useState(false);
+ 
+   useEffect(() => {
+@@ -371,7 +422,6 @@ function PersonalCard({ onDone }: { onDone: () => void }) {
+       emergency_name: d.emergency_name ?? "",
+       emergency_phone: d.emergency_phone ?? "",
+     });
+-    setSelfie(d.selfie_path ?? null);
+     setHydrated(true);
+   }, [hydrated, piiQ.data]);
+ 
+@@ -386,7 +436,7 @@ function PersonalCard({ onDone }: { onDone: () => void }) {
+         p_address: "",
+         p_emergency_name: form.emergency_name,
+         p_emergency_phone: form.emergency_phone,
+-        p_selfie_path: selfie ?? "",
++        p_selfie_path: piiQ.data?.selfie_path ?? selfie ?? "",
+       });
+       if (error) throw error;
+     },
+@@ -420,18 +470,7 @@ function PersonalCard({ onDone }: { onDone: () => void }) {
+         <p className="text-sm text-muted-foreground">{t("profile.encryptedNote")}</p>
+       </div>
+ 
+-      <div className="grid gap-4 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
+-        <div className="space-y-2">
+-          <Label>{t("profile.selfie")}</Label>
+-          <PhotoPicker
+-            value={selfie}
+-            onChange={setSelfie}
+-            folder="selfie"
+-            label={t("profile.selfie")}
+-          />
+-          <p className="text-xs text-muted-foreground">{t("profile.selfieHelp")}</p>
+-        </div>
+-
++      <div>
+         <div className="grid gap-4 sm:grid-cols-2">
+           {field("full_name", t("profile.fullName"))}
+           {field("id_number", t("profile.idNumber"))}
+diff --git a/src/routes/_authenticated/reviews.tsx b/src/routes/_authenticated/reviews.tsx
+index f511c97..d8fd203 100644
+--- a/src/routes/_authenticated/reviews.tsx
++++ b/src/routes/_authenticated/reviews.tsx
+@@ -1,29 +1,20 @@
+-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+-import { Navigate, createFileRoute, useLocation } from "@tanstack/react-router";
+-import {
+-  AlertTriangle,
+-  Building2,
+-  CheckCircle2,
+-  PackageMinus,
+-  RotateCcw,
+-  Star,
+-  UserRound,
+-} from "lucide-react";
+-import { useEffect, useMemo, useRef, useState } from "react";
++import { useMutation, useQueryClient } from "@tanstack/react-query";
++import { Link, Navigate, createFileRoute, useLocation } from "@tanstack/react-router";
++import { AlertTriangle, Archive, Building2, Star } from "lucide-react";
++import { useEffect, useRef, useState } from "react";
+ import { toast } from "sonner";
+ 
+ import { ListSkeleton, PageHeader, StatCard, StatsSkeleton } from "@/components/app-shell";
+-import { SignedPhoto } from "@/components/signed-photo";
+-import {
+-  COVER_HEIGHT,
+-  GRID_COLS,
+-  ViewToggle,
+-  useViewPrefs,
+-  type CardSize,
+-  type ViewMode,
+-} from "@/components/view-toggle";
++import { ComplaintList, Stars } from "@/components/complaint-card";
+ import { Button } from "@/components/ui/button";
++import { ViewToggle, useViewPrefs, type CardSize, type ViewMode } from "@/components/view-toggle";
+ import { useActiveGroup, useProfile } from "@/hooks/use-app";
++import {
++  makeNamers,
++  useComplaintsData,
++  useSplitComplaints,
++  type Complaint,
++} from "@/hooks/use-complaints";
+ import { useT } from "@/i18n";
+ import { supabase } from "@/integrations/supabase/client";
+ import { cn } from "@/lib/utils";
+@@ -41,85 +32,9 @@ export const Route = createFileRoute("/_authenticated/reviews")({
+   component: ReviewsPage,
+ });
+ 
+-type ReviewRow = {
+-  id: string;
+-  cleaner_user_id: string;
+-  cleaning_job_id: string | null;
+-  property_id: string;
+-  rating: number;
+-  comment: string | null;
+-  created_at: string;
+-};
+-
+-type StayReview = {
+-  id: string;
+-  property_id: string;
+-  customer_session_id: string | null;
+-  overall_rating: number | null;
+-  notes: string | null;
+-  submitted_at: string;
+-};
+-
+-type PhotoRow = { id: string; submission_id: string; photo_url: string };
+-
+-type ShortageRow = {
+-  id: string;
+-  property_id: string;
+-  customer_session_id: string | null;
+-  amenity_definition_id: string;
+-  actual_qty: number;
+-  expected_qty_snapshot: number;
+-  checked_at: string;
+-};
+-
+-type JobRow = {
+-  id: string;
+-  property_id: string;
+-  assigned_to_user_id: string | null;
+-  completed_at: string | null;
+-};
+-
+-type ResolutionRow = {
+-  id: string;
+-  property_id: string;
+-  complaint_key: string;
+-  resolution_note: string | null;
+-  resolved_by: string;
+-  resolved_at: string;
+-};
+-
+-/** One guest-reported problem: hygiene photos, written notes, missing items. */
+-type Complaint = {
+-  key: string;
+-  propertyId: string;
+-  sessionId: string | null;
+-  reportedAt: string;
+-  rating: number | null;
+-  notes: string | null;
+-  photos: PhotoRow[];
+-  shortages: ShortageRow[];
+-};
+-
+ /** Reviews and complaints share one dataset but are two separate surfaces. */
+ type Tab = "reviews" | "complaints";
+ 
+-function Stars({ value }: { value: number }) {
+-  return (
+-    <span className="flex shrink-0 items-center gap-0.5">
+-      {Array.from({ length: 5 }, (_, star) => (
+-        <Star
+-          key={star}
+-          className={cn(
+-            "h-3.5 w-3.5",
+-            star < value ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30",
+-          )}
+-          aria-hidden="true"
+-        />
+-      ))}
+-    </span>
+-  );
+-}
+-
+ function ReviewsPage() {
+   const t = useT();
+   const qc = useQueryClient();
+@@ -149,145 +64,9 @@ function ReviewsPage() {
+     prefs.write({ view, size: s });
+   };
+ 
+-  const reviewsQ = useQuery({
+-    queryKey: ["reviews", groupId],
+-    enabled: !!groupId,
+-    // Guest reviews land at unpredictable times: never serve a stale cache and
+-    // poll as a safety net on top of the realtime subscription below.
+-    staleTime: 0,
+-    refetchOnMount: "always",
+-    refetchOnWindowFocus: true,
+-    refetchInterval: 20_000,
+-    queryFn: async () => {
+-      const empty = {
+-        reviews: [] as ReviewRow[],
+-        stays: [] as StayReview[],
+-        photos: [] as PhotoRow[],
+-        shortages: [] as ShortageRow[],
+-        amenityNames: {} as Record<string, string>,
+-        roomCodes: {} as Record<string, string>,
+-        jobs: [] as JobRow[],
+-        properties: [] as { id: string; name: string }[],
+-        cleaners: [] as { user_id: string; display_name: string | null; username: string | null }[],
+-        resolutions: [] as ResolutionRow[],
+-      };
+-
+-      const { data: properties, error: propsError } = await supabase
+-        .from("properties")
+-        .select("id, name")
+-        .eq("owner_group_id", groupId!);
+-      if (propsError) throw propsError;
+-
+-      const propertyIds = (properties ?? []).map((property) => property.id);
+-      if (propertyIds.length === 0) return { ...empty, properties: properties ?? [] };
+-
+-      const { data: reviews, error: reviewsError } = await supabase
+-        .from("cleaner_ratings")
+-        .select("id, cleaner_user_id, cleaning_job_id, property_id, rating, comment, created_at")
+-        .in("property_id", propertyIds)
+-        .order("created_at", { ascending: false });
+-      if (reviewsError) throw reviewsError;
+-
+-      // Guests can also rate the stay itself (room condition step). Those
+-      // ratings never referenced a cleaner, so they were invisible here.
+-      const { data: stays } = await supabase
+-        .from("room_condition_submissions")
+-        .select("id, property_id, customer_session_id, overall_rating, notes, submitted_at")
+-        .in("property_id", propertyIds)
+-        .order("submitted_at", { ascending: false });
+-
+-      const stayRows = (stays ?? []) as StayReview[];
+-      const submissionIds = stayRows.map((stay) => stay.id);
+-      const sessionIds = stayRows
+-        .map((stay) => stay.customer_session_id)
+-        .filter((id): id is string => !!id);
+-
+-      // Hygiene evidence attached to a stay report.
+-      const { data: photos } = submissionIds.length
+-        ? await supabase
+-            .from("room_condition_photos")
+-            .select("id, submission_id, photo_url")
+-            .in("submission_id", submissionIds)
+-        : { data: [] as PhotoRow[] };
+-
+-      // Missing/short amenities counted by the guest.
+-      const { data: checks } = await supabase
+-        .from("amenity_checks")
+-        .select(
+-          "id, property_id, customer_session_id, amenity_definition_id, actual_qty, expected_qty_snapshot, checked_at",
+-        )
+-        .in("property_id", propertyIds)
+-        .eq("role", "customer")
+-        .eq("is_discrepancy", true)
+-        .order("checked_at", { ascending: false });
+-
+-      // Only a shortage is a complaint; a guest counting extra items is not.
+-      const shortages = ((checks ?? []) as ShortageRow[]).filter(
+-        (check) => check.actual_qty < check.expected_qty_snapshot,
+-      );
+-
+-      const amenityIds = Array.from(new Set(shortages.map((row) => row.amenity_definition_id)));
+-      const { data: amenities } = amenityIds.length
+-        ? await supabase.from("amenity_definitions").select("id, name").in("id", amenityIds)
+-        : { data: [] as { id: string; name: string }[] };
+-
+-      const allSessionIds = Array.from(
+-        new Set([
+-          ...sessionIds,
+-          ...shortages.map((row) => row.customer_session_id).filter((id): id is string => !!id),
+-        ]),
+-      );
+-      const { data: sessions } = allSessionIds.length
+-        ? await supabase.from("customer_sessions").select("id, room_code").in("id", allSessionIds)
+-        : { data: [] as { id: string; room_code: string }[] };
+-
+-      // "Who cleaned it": the last clean completed before the guest reported.
+-      const { data: jobs } = await supabase
+-        .from("cleaning_jobs")
+-        .select("id, property_id, assigned_to_user_id, completed_at")
+-        .in("property_id", propertyIds)
+-        .not("assigned_to_user_id", "is", null)
+-        .not("completed_at", "is", null)
+-        .order("completed_at", { ascending: false });
+-
+-      const jobRows = (jobs ?? []) as JobRow[];
+-
+-      // Which complaints the owner already dealt with.
+-      const { data: resolutions } = await supabase
+-        .from("complaint_resolutions")
+-        .select("id, property_id, complaint_key, resolution_note, resolved_by, resolved_at")
+-        .in("property_id", propertyIds);
+-
+-      const resolutionRows = (resolutions ?? []) as ResolutionRow[];
+-
+-      const cleanerIds = Array.from(
+-        new Set([
+-          ...(reviews ?? []).map((review) => review.cleaner_user_id),
+-          ...jobRows.map((job) => job.assigned_to_user_id).filter((id): id is string => !!id),
+-          ...resolutionRows.map((row) => row.resolved_by),
+-        ]),
+-      );
+-      const { data: cleaners } = cleanerIds.length
+-        ? await supabase
+-            .from("profiles")
+-            .select("user_id, display_name, username")
+-            .in("user_id", cleanerIds)
+-        : { data: [] };
+-
+-      return {
+-        reviews: (reviews ?? []) as ReviewRow[],
+-        stays: stayRows,
+-        photos: (photos ?? []) as PhotoRow[],
+-        shortages,
+-        amenityNames: Object.fromEntries((amenities ?? []).map((row) => [row.id, row.name])),
+-        roomCodes: Object.fromEntries((sessions ?? []).map((row) => [row.id, row.room_code])),
+-        jobs: jobRows,
+-        properties: properties ?? [],
+-        cleaners: cleaners ?? [],
+-        resolutions: resolutionRows,
+-      };
+-    },
+-  });
++  const reviewsQ = useComplaintsData(groupId);
++  const { open: openComplaints, resolved: resolvedComplaints, resolutionsByKey } =
++    useSplitComplaints(reviewsQ.data);
+ 
+   // Live updates: a review submitted by a guest shows up without a reload.
+   useEffect(() => {
+@@ -323,94 +102,8 @@ function ReviewsPage() {
+     };
+   }, [qc]);
+ 
+-  const reviews = useMemo(() => reviewsQ.data?.reviews ?? [], [reviewsQ.data]);
+-  const stays = useMemo(() => reviewsQ.data?.stays ?? [], [reviewsQ.data]);
+-
+-  // A complaint is: hygiene photos, a written note, or a counted shortage.
+-  const complaints = useMemo<Complaint[]>(() => {
+-    const data = reviewsQ.data;
+-    if (!data) return [];
+-
+-    const photosBySubmission = new Map<string, PhotoRow[]>();
+-    for (const photo of data.photos) {
+-      const list = photosBySubmission.get(photo.submission_id) ?? [];
+-      list.push(photo);
+-      photosBySubmission.set(photo.submission_id, list);
+-    }
+-
+-    const shortagesBySession = new Map<string, ShortageRow[]>();
+-    const orphanShortages: ShortageRow[] = [];
+-    for (const shortage of data.shortages) {
+-      if (!shortage.customer_session_id) {
+-        orphanShortages.push(shortage);
+-        continue;
+-      }
+-      const list = shortagesBySession.get(shortage.customer_session_id) ?? [];
+-      list.push(shortage);
+-      shortagesBySession.set(shortage.customer_session_id, list);
+-    }
+-
+-    const built: Complaint[] = [];
+-    const usedSessions = new Set<string>();
+-
+-    for (const stay of data.stays) {
+-      const photos = photosBySubmission.get(stay.id) ?? [];
+-      const shortages = stay.customer_session_id
+-        ? (shortagesBySession.get(stay.customer_session_id) ?? [])
+-        : [];
+-      if (stay.customer_session_id) usedSessions.add(stay.customer_session_id);
+-      const hasNotes = !!stay.notes && stay.notes.trim().length > 0;
+-      if (photos.length === 0 && shortages.length === 0 && !hasNotes) continue;
+-      built.push({
+-        key: stay.id,
+-        propertyId: stay.property_id,
+-        sessionId: stay.customer_session_id,
+-        reportedAt: stay.submitted_at,
+-        rating: stay.overall_rating,
+-        notes: hasNotes ? stay.notes : null,
+-        photos,
+-        shortages,
+-      });
+-    }
+-
+-    // Shortages counted without a stay report still deserve a card.
+-    for (const [sessionId, shortages] of shortagesBySession) {
+-      if (usedSessions.has(sessionId)) continue;
+-      built.push({
+-        key: `session-${sessionId}`,
+-        propertyId: shortages[0].property_id,
+-        sessionId,
+-        reportedAt: shortages[0].checked_at,
+-        rating: null,
+-        notes: null,
+-        photos: [],
+-        shortages,
+-      });
+-    }
+-    for (const shortage of orphanShortages) {
+-      built.push({
+-        key: `check-${shortage.id}`,
+-        propertyId: shortage.property_id,
+-        sessionId: null,
+-        reportedAt: shortage.checked_at,
+-        rating: null,
+-        notes: null,
+-        photos: [],
+-        shortages: [shortage],
+-      });
+-    }
+-
+-    return built.sort((a, b) => b.reportedAt.localeCompare(a.reportedAt));
+-  }, [reviewsQ.data]);
+-
+-  const resolutionsByKey = useMemo(() => {
+-    const map = new Map<string, ResolutionRow>();
+-    for (const row of reviewsQ.data?.resolutions ?? []) map.set(row.complaint_key, row);
+-    return map;
+-  }, [reviewsQ.data]);
+-
+-  const openComplaints = complaints.filter((complaint) => !resolutionsByKey.has(complaint.key));
+-  const resolvedComplaints = complaints.filter((complaint) => resolutionsByKey.has(complaint.key));
++  const reviews = reviewsQ.data?.reviews ?? [];
++  const stays = reviewsQ.data?.stays ?? [];
+ 
+   // Only the owner can close a complaint out; the migration enforces the same
+   // rule at the database level, this just hides a button that would fail.
+@@ -447,7 +140,7 @@ function ReviewsPage() {
+     if (!wantsComplaints || reviewsQ.isLoading) return;
+     setTab("complaints");
+     complaintsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+-  }, [wantsComplaints, reviewsQ.isLoading, complaints.length]);
++  }, [wantsComplaints, reviewsQ.isLoading, openComplaints.length]);
+ 
+   if (
+     !profileLoading &&
+@@ -457,27 +150,17 @@ function ReviewsPage() {
+     return <Navigate to="/dashboard" replace />;
+   }
+ 
+-  const propertyName = (id: string) =>
+-    reviewsQ.data?.properties.find((property) => property.id === id)?.name ?? id.slice(0, 8);
+-  const personName = (id: string) => {
+-    const person = reviewsQ.data?.cleaners.find((candidate) => candidate.user_id === id);
+-    return person?.display_name || person?.username || id.slice(0, 8);
+-  };
+-  const cleanerName = personName;
+-  const roomLabel = (complaint: Complaint) => {
+-    const code = complaint.sessionId ? reviewsQ.data?.roomCodes[complaint.sessionId] : null;
+-    const name = propertyName(complaint.propertyId);
+-    return code ? `${name} · ${t("reviews.room")} ${code}` : name;
+-  };
+-  /** The cleaner responsible: last clean completed before the guest reported. */
+-  const cleanerForComplaint = (complaint: Complaint) => {
++  const { propertyName, personName } = makeNamers(reviewsQ.data);
++
++  /** Who cleaned the room this guest stayed in, for the stay list. */
++  const stayCleaner = (propertyId: string, submittedAt: string) => {
+     const job = (reviewsQ.data?.jobs ?? []).find(
+       (candidate) =>
+-        candidate.property_id === complaint.propertyId &&
++        candidate.property_id === propertyId &&
+         !!candidate.completed_at &&
+-        candidate.completed_at <= complaint.reportedAt,
++        candidate.completed_at <= submittedAt,
+     );
+-    return job?.assigned_to_user_id ? cleanerName(job.assigned_to_user_id) : null;
++    return personName(job?.assigned_to_user_id ?? null);
+   };
+ 
+   const cleanerIds = Array.from(new Set(reviews.map((review) => review.cleaner_user_id)));
+@@ -490,130 +173,6 @@ function ReviewsPage() {
+     : "—";
+   const ratedStays = stays.filter((stay) => !!stay.overall_rating);
+ 
+-  /** One complaint card. `compact` drops the photo strip in small tiles. */
+-  const ComplaintCard = ({ complaint, compact }: { complaint: Complaint; compact: boolean }) => {
+-    const cleaner = cleanerForComplaint(complaint);
+-    const resolution = resolutionsByKey.get(complaint.key);
+-    return (
+-      <li
+-        className={cn(
+-          "space-y-3 rounded-lg border p-4",
+-          resolution
+-            ? "border-border bg-muted/40"
+-            : "border-destructive/30 bg-destructive/5",
+-        )}
+-      >
+-        <div className="flex flex-wrap items-start justify-between gap-2">
+-          <div className="min-w-0">
+-            <p className="truncate font-medium">{roomLabel(complaint)}</p>
+-            <p className="text-xs text-muted-foreground">
+-              {t("reviews.cleanedBy")} {cleaner ?? t("reviews.unknownCleaner")} · {t("reviews.on")}{" "}
+-              {new Date(complaint.reportedAt).toLocaleString()}
+-            </p>
+-          </div>
+-          {complaint.rating != null && <Stars value={complaint.rating} />}
+-        </div>
+-
+-        {complaint.shortages.length > 0 && (
+-          <div className="space-y-1">
+-            <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+-              <PackageMinus className="h-3.5 w-3.5" aria-hidden="true" />
+-              {t("reviews.missingAmenities")}
+-            </p>
+-            <ul className="text-sm">
+-              {complaint.shortages.map((shortage) => (
+-                <li key={shortage.id}>
+-                  {reviewsQ.data?.amenityNames[shortage.amenity_definition_id] ??
+-                    shortage.amenity_definition_id.slice(0, 8)}
+-                  {": "}
+-                  {shortage.actual_qty} / {shortage.expected_qty_snapshot}
+-                </li>
+-              ))}
+-            </ul>
+-          </div>
+-        )}
+-
+-        {complaint.notes && (
+-          <div className="space-y-1">
+-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+-              {t("reviews.guestNotes")}
+-            </p>
+-            <p className={cn("text-sm", compact && "line-clamp-3")}>{complaint.notes}</p>
+-          </div>
+-        )}
+-
+-        {complaint.photos.length > 0 && (
+-          <div className="space-y-1">
+-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+-              {t("reviews.hygienePhotos")}
+-            </p>
+-            <div className="flex flex-wrap gap-2">
+-              {(compact ? complaint.photos.slice(0, 2) : complaint.photos).map((photo) => (
+-                <SignedPhoto
+-                  key={photo.id}
+-                  path={photo.photo_url}
+-                  alt={t("reviews.hygienePhotos")}
+-                  className={cn("w-24", compact ? COVER_HEIGHT.sm : "h-24")}
+-                />
+-              ))}
+-            </div>
+-          </div>
+-        )}
+-
+-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2">
+-          {resolution ? (
+-            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+-              <CheckCircle2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+-              {t("reviews.resolved")} · {t("reviews.resolvedBy")}{" "}
+-              {personName(resolution.resolved_by)} · {t("reviews.on")}{" "}
+-              {new Date(resolution.resolved_at).toLocaleString()}
+-            </p>
+-          ) : (
+-            <span className="text-xs font-medium uppercase tracking-wide text-destructive">
+-              {t("reviews.openComplaints")}
+-            </span>
+-          )}
+-          {canResolve && (
+-            <Button
+-              type="button"
+-              size="sm"
+-              variant={resolution ? "outline" : "default"}
+-              disabled={resolveM.isPending}
+-              onClick={() => resolveM.mutate({ complaint, resolve: !resolution })}
+-            >
+-              {resolution ? (
+-                <>
+-                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+-                  {t("reviews.reopen")}
+-                </>
+-              ) : (
+-                <>
+-                  <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+-                  {t("reviews.resolve")}
+-                </>
+-              )}
+-            </Button>
+-          )}
+-        </div>
+-      </li>
+-    );
+-  };
+-
+-  const ComplaintList = ({ items }: { items: Complaint[] }) =>
+-    view === "list" ? (
+-      <ul className="space-y-4">
+-        {items.map((complaint) => (
+-          <ComplaintCard key={complaint.key} complaint={complaint} compact={false} />
+-        ))}
+-      </ul>
+-    ) : (
+-      <ul className={GRID_COLS[size]}>
+-        {items.map((complaint) => (
+-          <ComplaintCard key={complaint.key} complaint={complaint} compact={size === "sm"} />
+-        ))}
+-      </ul>
+-    );
+-
+   return (
+     <>
+       <PageHeader title={t("reviews.title")} description={t("reviews.subtitle")} />
+@@ -651,7 +210,7 @@ function ReviewsPage() {
+         </div>
+       ) : (
+         <div className="space-y-6">
+-          <div className="grid gap-4 sm:grid-cols-4">
++          <div className="grid gap-4 sm:grid-cols-3">
+             <StatCard label={t("reviews.average")} value={average} icon={Star} delay={0} />
+             <StatCard
+               label={t("reviews.count")}
+@@ -659,17 +218,11 @@ function ReviewsPage() {
+               icon={Building2}
+               delay={80}
+             />
+-            <StatCard
+-              label={t("reviews.pickCleaner")}
+-              value={cleanerIds.length}
+-              icon={UserRound}
+-              delay={160}
+-            />
+             <StatCard
+               label={t("reviews.complaints")}
+               value={openComplaints.length}
+               icon={AlertTriangle}
+-              delay={240}
++              delay={160}
+             />
+           </div>
+ 
+@@ -699,7 +252,7 @@ function ReviewsPage() {
+                       >
+                         <header className="flex items-start justify-between gap-3">
+                           <div className="min-w-0">
+-                            <h2 className="truncate text-lg">{cleanerName(cleanerId)}</h2>
++                            <h2 className="truncate text-lg">{personName(cleanerId)}</h2>
+                             <p className="text-sm text-muted-foreground">
+                               {cleanerReviews.length} {t("reviews.count").toLowerCase()}
+                             </p>
+@@ -740,7 +293,10 @@ function ReviewsPage() {
+                         <li key={stay.id} className="flex items-center justify-between gap-3 py-3">
+                           <span className="min-w-0 truncate text-muted-foreground">
+                             {t("reviews.forProperty")} {propertyName(stay.property_id)} ·{" "}
+-                            {t("reviews.on")} {new Date(stay.submitted_at).toLocaleDateString()}
++                            {t("reviews.cleanedBy")}{" "}
++                            {stayCleaner(stay.property_id, stay.submitted_at) ??
++                              t("reviews.unknownCleaner")}{" "}
++                            · {t("reviews.on")} {new Date(stay.submitted_at).toLocaleDateString()}
+                           </span>
+                           <Stars value={stay.overall_rating ?? 0} />
+                         </li>
+@@ -751,7 +307,8 @@ function ReviewsPage() {
+               </>
+             )
+           ) : (
+-            /* Complaints: hygiene photos, missing amenities, guest notes. */
++            /* Complaints: hygiene photos, missing amenities, guest notes.
++               Resolved complaints are hidden here; they live in the archive. */
+             <section
+               id="complaints"
+               ref={complaintsRef}
+@@ -782,20 +339,29 @@ function ReviewsPage() {
+                   {t("reviews.complaintsEmpty")}
+                 </p>
+               ) : (
+-                <ComplaintList items={openComplaints} />
++                <ComplaintList
++                  items={openComplaints}
++                  view={view}
++                  size={size}
++                  data={reviewsQ.data}
++                  resolutionsByKey={resolutionsByKey}
++                  canResolve={canResolve}
++                  busy={resolveM.isPending}
++                  onToggleResolve={(complaint, resolve) => resolveM.mutate({ complaint, resolve })}
++                />
+               )}
+ 
+-              <div className="space-y-3 border-t border-border pt-4">
+-                <h3 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+-                  {t("reviews.resolvedComplaints")}
+-                </h3>
+-                {resolvedComplaints.length === 0 ? (
+-                  <p className="py-2 text-center text-sm text-muted-foreground">
+-                    {t("reviews.resolvedEmpty")}
+-                  </p>
+-                ) : (
+-                  <ComplaintList items={resolvedComplaints} />
+-                )}
++              {/* Resolved complaints stay out of sight until asked for. */}
++              <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
++                <p className="text-sm text-muted-foreground">
++                  {resolvedComplaints.length} {t("reviews.resolvedComplaints").toLowerCase()}
++                </p>
++                <Button asChild size="sm" variant="outline">
++                  <Link to="/reviews-archive">
++                    <Archive className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
++                    {t("reviews.viewMore")}
++                  </Link>
++                </Button>
+               </div>
+             </section>
+           )}
+diff --git a/src/hooks/use-complaints.ts b/src/hooks/use-complaints.ts
+new file mode 100644
+--- /dev/null
++++ b/src/hooks/use-complaints.ts
+@@ -0,0 +1,384 @@
++import { useQuery } from "@tanstack/react-query";
++import { useMemo } from "react";
++
++import { supabase } from "@/integrations/supabase/client";
++
++/**
++ * Shared data layer for the reviews page and the resolved-complaints archive.
++ * Both surfaces read exactly the same rows, so the fetching and the
++ * complaint-building rules live here instead of being copied per route.
++ */
++
++export type ReviewRow = {
++  id: string;
++  cleaner_user_id: string;
++  cleaning_job_id: string | null;
++  property_id: string;
++  rating: number;
++  comment: string | null;
++  created_at: string;
++};
++
++export type StayReview = {
++  id: string;
++  property_id: string;
++  customer_session_id: string | null;
++  overall_rating: number | null;
++  notes: string | null;
++  submitted_at: string;
++};
++
++export type PhotoRow = { id: string; submission_id: string; photo_url: string };
++
++export type CheckRow = {
++  id: string;
++  property_id: string;
++  customer_session_id: string | null;
++  amenity_definition_id: string;
++  actual_qty: number;
++  expected_qty_snapshot: number;
++  checked_at: string;
++  is_discrepancy: boolean;
++};
++
++export type AmenityDef = {
++  id: string;
++  property_id: string;
++  name: string;
++  expected_qty: number;
++};
++
++export type JobRow = {
++  id: string;
++  property_id: string;
++  assigned_to_user_id: string | null;
++  completed_at: string | null;
++};
++
++export type ResolutionRow = {
 +  id: string;
 +  property_id: string;
 +  complaint_key: string;
@@ -171,61 +1775,141 @@ index 6959716..f511c97 100644
 +  resolved_at: string;
 +};
 +
- /** One guest-reported problem: hygiene photos, written notes, missing items. */
- type Complaint = {
-   key: string;
-@@ -73,6 +100,9 @@ type Complaint = {
-   shortages: ShortageRow[];
- };
- 
-+/** Reviews and complaints share one dataset but are two separate surfaces. */
-+type Tab = "reviews" | "complaints";
++export type PersonRow = {
++  user_id: string;
++  display_name: string | null;
++  username: string | null;
++};
 +
- function Stars({ value }: { value: number }) {
-   return (
-     <span className="flex shrink-0 items-center gap-0.5">
-@@ -98,6 +128,27 @@ function ReviewsPage() {
-   const location = useLocation();
-   const complaintsRef = useRef<HTMLElement | null>(null);
- 
-+  // Notifications deep-link here with ?section=complaints.
-+  const wantsComplaints =
-+    new URLSearchParams(location.searchStr ?? "").get("section") === "complaints";
++/** An amenity the guest never counted: reported as fully missing (0 / expected). */
++export type UnreportedAmenity = { id: string; name: string; expected: number };
 +
-+  const [tab, setTab] = useState<Tab>(wantsComplaints ? "complaints" : "reviews");
++/** One guest-reported problem: hygiene photos, written notes, missing items. */
++export type Complaint = {
++  key: string;
++  propertyId: string;
++  sessionId: string | null;
++  reportedAt: string;
++  rating: number | null;
++  notes: string | null;
++  photos: PhotoRow[];
++  shortages: CheckRow[];
++  /** Amenities on the property checklist the guest left unanswered. */
++  unreported: UnreportedAmenity[];
++  /** Cleaner responsible: last clean completed before the guest reported. */
++  cleanerUserId: string | null;
++};
 +
-+  // Complaint cards can be read as a list or as compact tiles, exactly like
-+  // the property catalog. The choice is remembered per browser.
-+  const prefs = useViewPrefs("complaints");
-+  const initialPrefs = prefs.read();
-+  const [view, setView] = useState<ViewMode>(initialPrefs.view);
-+  const [size, setSize] = useState<CardSize>(initialPrefs.size);
-+  const setViewMode = (v: ViewMode) => {
-+    setView(v);
-+    prefs.write({ view: v, size });
-+  };
-+  const setCardSize = (s: CardSize) => {
-+    setSize(s);
-+    prefs.write({ view, size: s });
-+  };
++export type ComplaintsData = {
++  reviews: ReviewRow[];
++  stays: StayReview[];
++  photos: PhotoRow[];
++  checks: CheckRow[];
++  amenityDefs: AmenityDef[];
++  roomCodes: Record<string, string>;
++  jobs: JobRow[];
++  properties: { id: string; name: string }[];
++  cleaners: PersonRow[];
++  resolutions: ResolutionRow[];
++};
 +
-   const reviewsQ = useQuery({
-     queryKey: ["reviews", groupId],
-     enabled: !!groupId,
-@@ -118,6 +169,7 @@ function ReviewsPage() {
-         jobs: [] as JobRow[],
-         properties: [] as { id: string; name: string }[],
-         cleaners: [] as { user_id: string; display_name: string | null; username: string | null }[],
-+        resolutions: [] as ResolutionRow[],
-       };
- 
-       const { data: properties, error: propsError } = await supabase
-@@ -199,10 +251,20 @@ function ReviewsPage() {
-         .order("completed_at", { ascending: false });
- 
-       const jobRows = (jobs ?? []) as JobRow[];
++const EMPTY: ComplaintsData = {
++  reviews: [],
++  stays: [],
++  photos: [],
++  checks: [],
++  amenityDefs: [],
++  roomCodes: {},
++  jobs: [],
++  properties: [],
++  cleaners: [],
++  resolutions: [],
++};
 +
-+      // Which complaints the owner already dealt with.
++/** Every row the reviews surfaces need, in one cached query. */
++export function useComplaintsData(groupId: string | null | undefined) {
++  return useQuery({
++    queryKey: ["reviews", groupId],
++    enabled: !!groupId,
++    // Guest reviews land at unpredictable times: never serve a stale cache and
++    // poll as a safety net on top of the realtime subscription.
++    staleTime: 0,
++    refetchOnMount: "always",
++    refetchOnWindowFocus: true,
++    refetchInterval: 20_000,
++    queryFn: async (): Promise<ComplaintsData> => {
++      const { data: properties, error: propsError } = await supabase
++        .from("properties")
++        .select("id, name")
++        .eq("owner_group_id", groupId!);
++      if (propsError) throw propsError;
++
++      const propertyIds = (properties ?? []).map((property) => property.id);
++      if (propertyIds.length === 0) return { ...EMPTY, properties: properties ?? [] };
++
++      const { data: reviews, error: reviewsError } = await supabase
++        .from("cleaner_ratings")
++        .select("id, cleaner_user_id, cleaning_job_id, property_id, rating, comment, created_at")
++        .in("property_id", propertyIds)
++        .order("created_at", { ascending: false });
++      if (reviewsError) throw reviewsError;
++
++      const { data: stays } = await supabase
++        .from("room_condition_submissions")
++        .select("id, property_id, customer_session_id, overall_rating, notes, submitted_at")
++        .in("property_id", propertyIds)
++        .order("submitted_at", { ascending: false });
++
++      const stayRows = (stays ?? []) as StayReview[];
++      const submissionIds = stayRows.map((stay) => stay.id);
++
++      const { data: photos } = submissionIds.length
++        ? await supabase
++            .from("room_condition_photos")
++            .select("id, submission_id, photo_url")
++            .in("submission_id", submissionIds)
++        : { data: [] as PhotoRow[] };
++
++      // Every guest amenity count, not only the short ones: an amenity with no
++      // row at all is what makes "missing 2 / 2" possible.
++      const { data: checks } = await supabase
++        .from("amenity_checks")
++        .select(
++          "id, property_id, customer_session_id, amenity_definition_id, actual_qty, expected_qty_snapshot, checked_at, is_discrepancy",
++        )
++        .in("property_id", propertyIds)
++        .eq("role", "customer")
++        .order("checked_at", { ascending: false });
++
++      const checkRows = (checks ?? []) as CheckRow[];
++
++      const { data: amenityDefs } = await supabase
++        .from("amenity_definitions")
++        .select("id, property_id, name, expected_qty")
++        .in("property_id", propertyIds);
++
++      const sessionIds = Array.from(
++        new Set(
++          [
++            ...stayRows.map((stay) => stay.customer_session_id),
++            ...checkRows.map((row) => row.customer_session_id),
++          ].filter((id): id is string => !!id),
++        ),
++      );
++      const { data: sessions } = sessionIds.length
++        ? await supabase.from("customer_sessions").select("id, room_code").in("id", sessionIds)
++        : { data: [] as { id: string; room_code: string }[] };
++
++      const { data: jobs } = await supabase
++        .from("cleaning_jobs")
++        .select("id, property_id, assigned_to_user_id, completed_at")
++        .in("property_id", propertyIds)
++        .not("assigned_to_user_id", "is", null)
++        .not("completed_at", "is", null)
++        .order("completed_at", { ascending: false });
++
++      const jobRows = (jobs ?? []) as JobRow[];
++
 +      const { data: resolutions } = await supabase
 +        .from("complaint_resolutions")
 +        .select("id, property_id, complaint_key, resolution_note, resolved_by, resolved_at")
@@ -233,750 +1917,911 @@ index 6959716..f511c97 100644
 +
 +      const resolutionRows = (resolutions ?? []) as ResolutionRow[];
 +
-       const cleanerIds = Array.from(
-         new Set([
-           ...(reviews ?? []).map((review) => review.cleaner_user_id),
-           ...jobRows.map((job) => job.assigned_to_user_id).filter((id): id is string => !!id),
++      const peopleIds = Array.from(
++        new Set([
++          ...(reviews ?? []).map((review) => review.cleaner_user_id),
++          ...jobRows.map((job) => job.assigned_to_user_id).filter((id): id is string => !!id),
 +          ...resolutionRows.map((row) => row.resolved_by),
-         ]),
-       );
-       const { data: cleaners } = cleanerIds.length
-@@ -222,6 +284,7 @@ function ReviewsPage() {
-         jobs: jobRows,
-         properties: properties ?? [],
-         cleaners: cleaners ?? [],
++        ]),
++      );
++      const { data: people } = peopleIds.length
++        ? await supabase
++            .from("profiles")
++            .select("user_id, display_name, username")
++            .in("user_id", peopleIds)
++        : { data: [] as PersonRow[] };
++
++      return {
++        reviews: (reviews ?? []) as ReviewRow[],
++        stays: stayRows,
++        photos: (photos ?? []) as PhotoRow[],
++        checks: checkRows,
++        amenityDefs: (amenityDefs ?? []) as AmenityDef[],
++        roomCodes: Object.fromEntries((sessions ?? []).map((row) => [row.id, row.room_code])),
++        jobs: jobRows,
++        properties: properties ?? [],
++        cleaners: (people ?? []) as PersonRow[],
 +        resolutions: resolutionRows,
-       };
-     },
-   });
-@@ -249,6 +312,11 @@ function ReviewsPage() {
-         invalidate,
-       )
-       .on("postgres_changes", { event: "*", schema: "public", table: "amenity_checks" }, invalidate)
-+      .on(
-+        "postgres_changes",
-+        { event: "*", schema: "public", table: "complaint_resolutions" },
-+        invalidate,
-+      )
-       .subscribe();
-     return () => {
-       supabase.removeChannel(channel);
-@@ -335,11 +403,49 @@ function ReviewsPage() {
-     return built.sort((a, b) => b.reportedAt.localeCompare(a.reportedAt));
-   }, [reviewsQ.data]);
- 
--  // Notifications deep-link here with ?section=complaints.
--  const wantsComplaints =
--    new URLSearchParams(location.searchStr ?? "").get("section") === "complaints";
-+  const resolutionsByKey = useMemo(() => {
-+    const map = new Map<string, ResolutionRow>();
-+    for (const row of reviewsQ.data?.resolutions ?? []) map.set(row.complaint_key, row);
-+    return map;
-+  }, [reviewsQ.data]);
-+
-+  const openComplaints = complaints.filter((complaint) => !resolutionsByKey.has(complaint.key));
-+  const resolvedComplaints = complaints.filter((complaint) => resolutionsByKey.has(complaint.key));
-+
-+  // Only the owner can close a complaint out; the migration enforces the same
-+  // rule at the database level, this just hides a button that would fail.
-+  const canResolve = profile?.primary_role === "owner";
-+
-+  const resolveM = useMutation({
-+    mutationFn: async ({ complaint, resolve }: { complaint: Complaint; resolve: boolean }) => {
-+      if (resolve) {
-+        const { error } = await supabase.from("complaint_resolutions").insert({
-+          property_id: complaint.propertyId,
-+          complaint_key: complaint.key,
-+          resolved_by: profile!.user_id,
-+        });
-+        if (error) throw error;
-+      } else {
-+        const { error } = await supabase
-+          .from("complaint_resolutions")
-+          .delete()
-+          .eq("complaint_key", complaint.key);
-+        if (error) throw error;
-+      }
-+      return resolve;
-+    },
-+    onSuccess: (resolve) => {
-+      toast.success(resolve ? t("reviews.resolveSaved") : t("reviews.reopenSaved"));
-+      qc.invalidateQueries({ queryKey: ["reviews"] });
-+    },
-+    onError: (error: unknown) => {
-+      toast.error(error instanceof Error ? error.message : t("common.error"));
++      };
 +    },
 +  });
++}
 +
-   useEffect(() => {
-     if (!wantsComplaints || reviewsQ.isLoading) return;
-+    setTab("complaints");
-     complaintsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-   }, [wantsComplaints, reviewsQ.isLoading, complaints.length]);
- 
-@@ -353,10 +459,11 @@ function ReviewsPage() {
- 
-   const propertyName = (id: string) =>
-     reviewsQ.data?.properties.find((property) => property.id === id)?.name ?? id.slice(0, 8);
--  const cleanerName = (id: string) => {
--    const cleaner = reviewsQ.data?.cleaners.find((person) => person.user_id === id);
--    return cleaner?.display_name || cleaner?.username || id.slice(0, 8);
-+  const personName = (id: string) => {
-+    const person = reviewsQ.data?.cleaners.find((candidate) => candidate.user_id === id);
-+    return person?.display_name || person?.username || id.slice(0, 8);
-   };
-+  const cleanerName = personName;
-   const roomLabel = (complaint: Complaint) => {
-     const code = complaint.sessionId ? reviewsQ.data?.roomCodes[complaint.sessionId] : null;
-     const name = propertyName(complaint.propertyId);
-@@ -383,9 +490,160 @@ function ReviewsPage() {
-     : "—";
-   const ratedStays = stays.filter((stay) => !!stay.overall_rating);
- 
-+  /** One complaint card. `compact` drops the photo strip in small tiles. */
-+  const ComplaintCard = ({ complaint, compact }: { complaint: Complaint; compact: boolean }) => {
-+    const cleaner = cleanerForComplaint(complaint);
-+    const resolution = resolutionsByKey.get(complaint.key);
-+    return (
-+      <li
-+        className={cn(
-+          "space-y-3 rounded-lg border p-4",
-+          resolution
-+            ? "border-border bg-muted/40"
-+            : "border-destructive/30 bg-destructive/5",
-+        )}
-+      >
-+        <div className="flex flex-wrap items-start justify-between gap-2">
-+          <div className="min-w-0">
-+            <p className="truncate font-medium">{roomLabel(complaint)}</p>
-+            <p className="text-xs text-muted-foreground">
-+              {t("reviews.cleanedBy")} {cleaner ?? t("reviews.unknownCleaner")} · {t("reviews.on")}{" "}
-+              {new Date(complaint.reportedAt).toLocaleString()}
-+            </p>
-+          </div>
-+          {complaint.rating != null && <Stars value={complaint.rating} />}
-+        </div>
++/** The cleaner on duty: last clean completed at or before the report. */
++function cleanerFor(data: ComplaintsData, propertyId: string, reportedAt: string): string | null {
++  const job = data.jobs.find(
++    (candidate) =>
++      candidate.property_id === propertyId &&
++      !!candidate.completed_at &&
++      candidate.completed_at <= reportedAt,
++  );
++  return job?.assigned_to_user_id ?? null;
++}
 +
-+        {complaint.shortages.length > 0 && (
-+          <div className="space-y-1">
-+            <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-+              <PackageMinus className="h-3.5 w-3.5" aria-hidden="true" />
-+              {t("reviews.missingAmenities")}
-+            </p>
-+            <ul className="text-sm">
-+              {complaint.shortages.map((shortage) => (
-+                <li key={shortage.id}>
-+                  {reviewsQ.data?.amenityNames[shortage.amenity_definition_id] ??
-+                    shortage.amenity_definition_id.slice(0, 8)}
-+                  {": "}
-+                  {shortage.actual_qty} / {shortage.expected_qty_snapshot}
-+                </li>
-+              ))}
-+            </ul>
-+          </div>
-+        )}
++/** Turn the raw rows into complaint cards. */
++export function buildComplaints(data: ComplaintsData | undefined): Complaint[] {
++  if (!data) return [];
 +
-+        {complaint.notes && (
-+          <div className="space-y-1">
-+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-+              {t("reviews.guestNotes")}
-+            </p>
-+            <p className={cn("text-sm", compact && "line-clamp-3")}>{complaint.notes}</p>
-+          </div>
-+        )}
++  const photosBySubmission = new Map<string, PhotoRow[]>();
++  for (const photo of data.photos) {
++    const list = photosBySubmission.get(photo.submission_id) ?? [];
++    list.push(photo);
++    photosBySubmission.set(photo.submission_id, list);
++  }
 +
-+        {complaint.photos.length > 0 && (
-+          <div className="space-y-1">
-+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-+              {t("reviews.hygienePhotos")}
-+            </p>
-+            <div className="flex flex-wrap gap-2">
-+              {(compact ? complaint.photos.slice(0, 2) : complaint.photos).map((photo) => (
-+                <SignedPhoto
-+                  key={photo.id}
-+                  path={photo.photo_url}
-+                  alt={t("reviews.hygienePhotos")}
-+                  className={cn("w-24", compact ? COVER_HEIGHT.sm : "h-24")}
-+                />
-+              ))}
-+            </div>
-+          </div>
-+        )}
++  // Only a shortage is a complaint; a guest counting extra items is not.
++  const shortagesBySession = new Map<string, CheckRow[]>();
++  const orphanShortages: CheckRow[] = [];
++  const answeredBySession = new Map<string, Set<string>>();
++  for (const check of data.checks) {
++    if (check.customer_session_id) {
++      const answered = answeredBySession.get(check.customer_session_id) ?? new Set<string>();
++      answered.add(check.amenity_definition_id);
++      answeredBySession.set(check.customer_session_id, answered);
++    }
++    if (!check.is_discrepancy || check.actual_qty >= check.expected_qty_snapshot) continue;
++    if (!check.customer_session_id) {
++      orphanShortages.push(check);
++      continue;
++    }
++    const list = shortagesBySession.get(check.customer_session_id) ?? [];
++    list.push(check);
++    shortagesBySession.set(check.customer_session_id, list);
++  }
 +
-+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2">
-+          {resolution ? (
-+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-+              <CheckCircle2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-+              {t("reviews.resolved")} · {t("reviews.resolvedBy")}{" "}
-+              {personName(resolution.resolved_by)} · {t("reviews.on")}{" "}
-+              {new Date(resolution.resolved_at).toLocaleString()}
-+            </p>
-+          ) : (
-+            <span className="text-xs font-medium uppercase tracking-wide text-destructive">
-+              {t("reviews.openComplaints")}
-+            </span>
-+          )}
-+          {canResolve && (
-+            <Button
-+              type="button"
-+              size="sm"
-+              variant={resolution ? "outline" : "default"}
-+              disabled={resolveM.isPending}
-+              onClick={() => resolveM.mutate({ complaint, resolve: !resolution })}
-+            >
-+              {resolution ? (
-+                <>
-+                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-+                  {t("reviews.reopen")}
-+                </>
-+              ) : (
-+                <>
-+                  <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
-+                  {t("reviews.resolve")}
-+                </>
-+              )}
-+            </Button>
-+          )}
-+        </div>
-+      </li>
-+    );
++  const defsByProperty = new Map<string, AmenityDef[]>();
++  for (const def of data.amenityDefs) {
++    const list = defsByProperty.get(def.property_id) ?? [];
++    list.push(def);
++    defsByProperty.set(def.property_id, list);
++  }
++
++  /** Checklist entries the guest never answered count as fully missing. */
++  const unreportedFor = (propertyId: string, sessionId: string | null): UnreportedAmenity[] => {
++    if (!sessionId) return [];
++    const defs = defsByProperty.get(propertyId) ?? [];
++    const answered = answeredBySession.get(sessionId) ?? new Set<string>();
++    // A guest who answered nothing at all never opened the amenity step, so
++    // treat the whole checklist as unanswered only when they reported something.
++    return defs
++      .filter((def) => !answered.has(def.id))
++      .map((def) => ({ id: def.id, name: def.name, expected: def.expected_qty }));
 +  };
 +
-+  const ComplaintList = ({ items }: { items: Complaint[] }) =>
-+    view === "list" ? (
-+      <ul className="space-y-4">
-+        {items.map((complaint) => (
-+          <ComplaintCard key={complaint.key} complaint={complaint} compact={false} />
-+        ))}
-+      </ul>
-+    ) : (
-+      <ul className={GRID_COLS[size]}>
-+        {items.map((complaint) => (
-+          <ComplaintCard key={complaint.key} complaint={complaint} compact={size === "sm"} />
-+        ))}
-+      </ul>
-+    );
++  const built: Complaint[] = [];
++  const usedSessions = new Set<string>();
 +
-   return (
-     <>
-       <PageHeader title={t("reviews.title")} description={t("reviews.subtitle")} />
++  for (const stay of data.stays) {
++    const photos = photosBySubmission.get(stay.id) ?? [];
++    const shortages = stay.customer_session_id
++      ? (shortagesBySession.get(stay.customer_session_id) ?? [])
++      : [];
++    if (stay.customer_session_id) usedSessions.add(stay.customer_session_id);
++    const hasNotes = !!stay.notes && stay.notes.trim().length > 0;
++    if (photos.length === 0 && shortages.length === 0 && !hasNotes) continue;
++    built.push({
++      key: stay.id,
++      propertyId: stay.property_id,
++      sessionId: stay.customer_session_id,
++      reportedAt: stay.submitted_at,
++      rating: stay.overall_rating,
++      notes: hasNotes ? stay.notes : null,
++      photos,
++      shortages,
++      unreported: unreportedFor(stay.property_id, stay.customer_session_id),
++      cleanerUserId: cleanerFor(data, stay.property_id, stay.submitted_at),
++    });
++  }
 +
-+      {/* Reviews / complaints switch. Reviews is the default surface; every
-+          complaint lives behind the complaints side of this toggle. */}
-+      <div className="mb-6 inline-flex rounded-lg border border-border p-1">
-+        {(["reviews", "complaints"] as const).map((value) => (
-+          <button
-+            key={value}
-+            type="button"
-+            aria-pressed={tab === value}
-+            onClick={() => setTab(value)}
-+            className={cn(
-+              "rounded-md px-4 py-1.5 text-sm font-medium transition-colors",
-+              tab === value
-+                ? "bg-primary text-primary-foreground"
-+                : "text-muted-foreground hover:text-foreground",
-+            )}
-+          >
-+            {value === "reviews" ? t("reviews.tabReviews") : t("reviews.tabComplaints")}
-+            {value === "complaints" && openComplaints.length > 0 && (
-+              <span className="ml-2 rounded-full bg-destructive/15 px-1.5 py-0.5 text-xs text-destructive">
-+                {openComplaints.length}
-+              </span>
-+            )}
-+          </button>
-+        ))}
++  for (const [sessionId, shortages] of shortagesBySession) {
++    if (usedSessions.has(sessionId)) continue;
++    built.push({
++      key: `session-${sessionId}`,
++      propertyId: shortages[0].property_id,
++      sessionId,
++      reportedAt: shortages[0].checked_at,
++      rating: null,
++      notes: null,
++      photos: [],
++      shortages,
++      unreported: unreportedFor(shortages[0].property_id, sessionId),
++      cleanerUserId: cleanerFor(data, shortages[0].property_id, shortages[0].checked_at),
++    });
++  }
++
++  for (const shortage of orphanShortages) {
++    built.push({
++      key: `check-${shortage.id}`,
++      propertyId: shortage.property_id,
++      sessionId: null,
++      reportedAt: shortage.checked_at,
++      rating: null,
++      notes: null,
++      photos: [],
++      shortages: [shortage],
++      unreported: [],
++      cleanerUserId: cleanerFor(data, shortage.property_id, shortage.checked_at),
++    });
++  }
++
++  return built.sort((a, b) => b.reportedAt.localeCompare(a.reportedAt));
++}
++
++/** Complaints split into what still needs attention and what is closed out. */
++export function useSplitComplaints(data: ComplaintsData | undefined) {
++  return useMemo(() => {
++    const complaints = buildComplaints(data);
++    const byKey = new Map<string, ResolutionRow>();
++    for (const row of data?.resolutions ?? []) byKey.set(row.complaint_key, row);
++    return {
++      complaints,
++      resolutionsByKey: byKey,
++      open: complaints.filter((complaint) => !byKey.has(complaint.key)),
++      resolved: complaints.filter((complaint) => byKey.has(complaint.key)),
++    };
++  }, [data]);
++}
++
++/** Display name helpers shared by both surfaces. */
++export function makeNamers(data: ComplaintsData | undefined) {
++  const propertyName = (id: string) =>
++    data?.properties.find((property) => property.id === id)?.name ?? id.slice(0, 8);
++  const personName = (id: string | null) => {
++    if (!id) return null;
++    const person = data?.cleaners.find((candidate) => candidate.user_id === id);
++    return person?.display_name || person?.username || id.slice(0, 8);
++  };
++  return { propertyName, personName };
++}
+diff --git a/src/components/complaint-card.tsx b/src/components/complaint-card.tsx
+new file mode 100644
+--- /dev/null
++++ b/src/components/complaint-card.tsx
+@@ -0,0 +1,209 @@
++import { CheckCircle2, PackageMinus, RotateCcw, Star } from "lucide-react";
++
++import { SignedPhoto } from "@/components/signed-photo";
++import { Button } from "@/components/ui/button";
++import { COVER_HEIGHT, GRID_COLS, type CardSize, type ViewMode } from "@/components/view-toggle";
++import type { Complaint, ComplaintsData, ResolutionRow } from "@/hooks/use-complaints";
++import { makeNamers } from "@/hooks/use-complaints";
++import { useT } from "@/i18n";
++import { cn } from "@/lib/utils";
++
++export function Stars({ value }: { value: number }) {
++  return (
++    <span className="flex shrink-0 items-center gap-0.5">
++      {Array.from({ length: 5 }, (_, star) => (
++        <Star
++          key={star}
++          className={cn(
++            "h-3.5 w-3.5",
++            star < value ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30",
++          )}
++          aria-hidden="true"
++        />
++      ))}
++    </span>
++  );
++}
++
++type CardProps = {
++  complaint: Complaint;
++  data: ComplaintsData | undefined;
++  resolution: ResolutionRow | undefined;
++  compact: boolean;
++  canResolve: boolean;
++  busy?: boolean;
++  onToggleResolve?: (complaint: Complaint, resolve: boolean) => void;
++};
++
++/** One complaint card. `compact` drops the photo strip in small tiles. */
++export function ComplaintCard({
++  complaint,
++  data,
++  resolution,
++  compact,
++  canResolve,
++  busy,
++  onToggleResolve,
++}: CardProps) {
++  const t = useT();
++  const { propertyName, personName } = makeNamers(data);
++
++  const code = complaint.sessionId ? data?.roomCodes[complaint.sessionId] : null;
++  const name = propertyName(complaint.propertyId);
++  const roomLabel = code ? `${name} · ${t("reviews.room")} ${code}` : name;
++  const cleaner = personName(complaint.cleanerUserId);
++  const amenityName = (id: string) =>
++    data?.amenityDefs.find((def) => def.id === id)?.name ?? id.slice(0, 8);
++
++  const hasAmenityProblem = complaint.shortages.length > 0 || complaint.unreported.length > 0;
++
++  return (
++    <li
++      className={cn(
++        "space-y-3 rounded-lg border p-4",
++        resolution ? "border-border bg-muted/40" : "border-destructive/30 bg-destructive/5",
++      )}
++    >
++      <div className="flex flex-wrap items-start justify-between gap-2">
++        <div className="min-w-0">
++          <p className="truncate font-medium">{roomLabel}</p>
++          <p className="text-xs text-muted-foreground">
++            {t("reviews.cleanedBy")} {cleaner ?? t("reviews.unknownCleaner")} · {t("reviews.on")}{" "}
++            {new Date(complaint.reportedAt).toLocaleString()}
++          </p>
++        </div>
++        {complaint.rating != null && <Stars value={complaint.rating} />}
 +      </div>
 +
-       {reviewsQ.isLoading ? (
-         <div className="space-y-6">
-           <StatsSkeleton count={3} />
-@@ -409,97 +667,101 @@ function ReviewsPage() {
-             />
-             <StatCard
-               label={t("reviews.complaints")}
--              value={complaints.length}
-+              value={openComplaints.length}
-               icon={AlertTriangle}
-               delay={240}
-             />
-           </div>
- 
--          {cleanerIds.length === 0 && ratedStays.length === 0 && complaints.length === 0 ? (
--            <section className="surface p-8 text-center text-sm text-muted-foreground">
--              {t("reviews.empty")}
--            </section>
-+          {tab === "reviews" ? (
-+            cleanerIds.length === 0 && ratedStays.length === 0 ? (
-+              <section className="surface p-8 text-center text-sm text-muted-foreground">
-+                {t("reviews.empty")}
-+              </section>
++      {hasAmenityProblem && (
++        <div className="space-y-1">
++          <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
++            <PackageMinus className="h-3.5 w-3.5" aria-hidden="true" />
++            {t("reviews.missingAmenities")}
++          </p>
++          <ul className="text-sm">
++            {complaint.shortages.map((shortage) => (
++              <li key={shortage.id}>
++                {amenityName(shortage.amenity_definition_id)}
++                {": "}
++                {shortage.expected_qty_snapshot - shortage.actual_qty} /{" "}
++                {shortage.expected_qty_snapshot}
++              </li>
++            ))}
++            {/* The guest skipped these entries, so nothing was confirmed present. */}
++            {complaint.unreported.map((item) => (
++              <li key={item.id} className="text-muted-foreground">
++                {item.name}
++                {": "}
++                {item.expected} / {item.expected}{" "}
++                <span className="text-xs">({t("reviews.notReported")})</span>
++              </li>
++            ))}
++          </ul>
++        </div>
++      )}
++
++      {complaint.notes && (
++        <div className="space-y-1">
++          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
++            {t("reviews.guestNotes")}
++          </p>
++          <p className={cn("text-sm", compact && "line-clamp-3")}>{complaint.notes}</p>
++        </div>
++      )}
++
++      {complaint.photos.length > 0 && (
++        <div className="space-y-1">
++          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
++            {t("reviews.hygienePhotos")}
++          </p>
++          <div className="flex flex-wrap gap-2">
++            {(compact ? complaint.photos.slice(0, 2) : complaint.photos).map((photo) => (
++              <SignedPhoto
++                key={photo.id}
++                path={photo.photo_url}
++                alt={t("reviews.hygienePhotos")}
++                className={cn("w-24", compact ? COVER_HEIGHT.sm : "h-24")}
++              />
++            ))}
++          </div>
++        </div>
++      )}
++
++      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2">
++        {resolution ? (
++          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
++            <CheckCircle2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
++            {t("reviews.resolved")} · {t("reviews.resolvedBy")} {personName(resolution.resolved_by)}{" "}
++            · {t("reviews.on")} {new Date(resolution.resolved_at).toLocaleString()}
++          </p>
++        ) : (
++          <span className="text-xs font-medium uppercase tracking-wide text-destructive">
++            {t("reviews.openComplaints")}
++          </span>
++        )}
++        {canResolve && onToggleResolve && (
++          <Button
++            type="button"
++            size="sm"
++            variant={resolution ? "outline" : "default"}
++            disabled={busy}
++            onClick={() => onToggleResolve(complaint, !resolution)}
++          >
++            {resolution ? (
++              <>
++                <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
++                {t("reviews.reopen")}
++              </>
 +            ) : (
 +              <>
-+                {/* Feedback: ratings only. Anything a guest complained about
-+                    lives behind the complaints toggle, with room and cleaner. */}
-+                <div className="grid gap-4 lg:grid-cols-2">
-+                  {cleanerIds.map((cleanerId, index) => {
-+                    const cleanerReviews = reviews.filter(
-+                      (review) => review.cleaner_user_id === cleanerId,
-+                    );
-+                    const cleanerAverage = (
-+                      cleanerReviews.reduce((sum, review) => sum + review.rating, 0) /
-+                      cleanerReviews.length
-+                    ).toFixed(1);
-+                    return (
-+                      <section
-+                        key={cleanerId}
-+                        className="surface space-y-4 p-5 animate-card-enter"
-+                        style={{ animationDelay: `${index * 50}ms` }}
-+                      >
-+                        <header className="flex items-start justify-between gap-3">
-+                          <div className="min-w-0">
-+                            <h2 className="truncate text-lg">{cleanerName(cleanerId)}</h2>
-+                            <p className="text-sm text-muted-foreground">
-+                              {cleanerReviews.length} {t("reviews.count").toLowerCase()}
-+                            </p>
-+                          </div>
-+                          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
-+                            <Star className="h-4 w-4 fill-current" aria-hidden="true" />
-+                            {cleanerAverage}
-+                          </span>
-+                        </header>
-+
-+                        <ul className="divide-y divide-border text-sm">
-+                          {cleanerReviews.map((review) => (
-+                            <li
-+                              key={review.id}
-+                              className="flex items-center justify-between gap-3 py-3"
-+                            >
-+                              <span className="min-w-0 truncate text-muted-foreground">
-+                                {t("reviews.forProperty")} {propertyName(review.property_id)} ·{" "}
-+                                {t("reviews.on")} {new Date(review.created_at).toLocaleDateString()}
-+                              </span>
-+                              <Stars value={review.rating} />
-+                            </li>
-+                          ))}
-+                        </ul>
-+                      </section>
-+                    );
-+                  })}
-+                </div>
-+
-+                {ratedStays.length > 0 && (
-+                  <section className="surface space-y-3 p-5">
-+                    <header>
-+                      <h2 className="text-lg">{t("reviews.stays")}</h2>
-+                      <p className="text-sm text-muted-foreground">{t("reviews.staysSubtitle")}</p>
-+                    </header>
-+                    <ul className="divide-y divide-border text-sm">
-+                      {ratedStays.map((stay) => (
-+                        <li key={stay.id} className="flex items-center justify-between gap-3 py-3">
-+                          <span className="min-w-0 truncate text-muted-foreground">
-+                            {t("reviews.forProperty")} {propertyName(stay.property_id)} ·{" "}
-+                            {t("reviews.on")} {new Date(stay.submitted_at).toLocaleDateString()}
-+                          </span>
-+                          <Stars value={stay.overall_rating ?? 0} />
-+                        </li>
-+                      ))}
-+                    </ul>
-+                  </section>
-+                )}
++                <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
++                {t("reviews.resolve")}
 +              </>
-+            )
-           ) : (
--            <>
--              {/* Feedback: ratings only. Anything a guest complained about lives
--                  in the complaints section below, with room and cleaner. */}
--              <div className="grid gap-4 lg:grid-cols-2">
--                {cleanerIds.map((cleanerId, index) => {
--                  const cleanerReviews = reviews.filter(
--                    (review) => review.cleaner_user_id === cleanerId,
--                  );
--                  const cleanerAverage = (
--                    cleanerReviews.reduce((sum, review) => sum + review.rating, 0) /
--                    cleanerReviews.length
--                  ).toFixed(1);
--                  return (
--                    <section
--                      key={cleanerId}
--                      className="surface space-y-4 p-5 animate-card-enter"
--                      style={{ animationDelay: `${index * 50}ms` }}
--                    >
--                      <header className="flex items-start justify-between gap-3">
--                        <div className="min-w-0">
--                          <h2 className="truncate text-lg">{cleanerName(cleanerId)}</h2>
--                          <p className="text-sm text-muted-foreground">
--                            {cleanerReviews.length} {t("reviews.count").toLowerCase()}
--                          </p>
--                        </div>
--                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary">
--                          <Star className="h-4 w-4 fill-current" aria-hidden="true" />
--                          {cleanerAverage}
--                        </span>
--                      </header>
--
--                      <ul className="divide-y divide-border text-sm">
--                        {cleanerReviews.map((review) => (
--                          <li
--                            key={review.id}
--                            className="flex items-center justify-between gap-3 py-3"
--                          >
--                            <span className="min-w-0 truncate text-muted-foreground">
--                              {t("reviews.forProperty")} {propertyName(review.property_id)} ·{" "}
--                              {t("reviews.on")} {new Date(review.created_at).toLocaleDateString()}
--                            </span>
--                            <Stars value={review.rating} />
--                          </li>
--                        ))}
--                      </ul>
--                    </section>
--                  );
--                })}
--              </div>
--
--              {ratedStays.length > 0 && (
--                <section className="surface space-y-3 p-5">
--                  <header>
--                    <h2 className="text-lg">{t("reviews.stays")}</h2>
--                    <p className="text-sm text-muted-foreground">{t("reviews.staysSubtitle")}</p>
--                  </header>
--                  <ul className="divide-y divide-border text-sm">
--                    {ratedStays.map((stay) => (
--                      <li key={stay.id} className="flex items-center justify-between gap-3 py-3">
--                        <span className="min-w-0 truncate text-muted-foreground">
--                          {t("reviews.forProperty")} {propertyName(stay.property_id)} ·{" "}
--                          {t("reviews.on")} {new Date(stay.submitted_at).toLocaleDateString()}
--                        </span>
--                        <Stars value={stay.overall_rating ?? 0} />
--                      </li>
--                    ))}
--                  </ul>
--                </section>
-+            /* Complaints: hygiene photos, missing amenities, guest notes. */
-+            <section
-+              id="complaints"
-+              ref={complaintsRef}
-+              className={cn(
-+                "surface space-y-4 p-5 scroll-mt-28",
-+                wantsComplaints && "ring-2 ring-destructive/40",
-               )}
--
--              {/* Complaints: hygiene photos, missing amenities, guest notes. */}
--              <section
--                id="complaints"
--                ref={complaintsRef}
--                className={cn(
--                  "surface space-y-4 p-5 scroll-mt-28",
--                  wantsComplaints && "ring-2 ring-destructive/40",
--                )}
--              >
--                <header className="flex items-start gap-2">
-+            >
-+              <header className="flex flex-wrap items-start justify-between gap-3">
-+                <div className="flex items-start gap-2">
-                   <AlertTriangle
-                     className="mt-0.5 h-5 w-5 shrink-0 text-destructive"
-                     aria-hidden="true"
-@@ -510,84 +772,32 @@ function ReviewsPage() {
-                       {t("reviews.complaintsSubtitle")}
-                     </p>
-                   </div>
--                </header>
-+                </div>
-+                {/* Same arrangement control as the property catalog. */}
-+                <ViewToggle view={view} onView={setViewMode} size={size} onSize={setCardSize} />
-+              </header>
++            )}
++          </Button>
++        )}
++      </div>
++    </li>
++  );
++}
 +
-+              {openComplaints.length === 0 ? (
-+                <p className="py-4 text-center text-sm text-muted-foreground">
-+                  {t("reviews.complaintsEmpty")}
-+                </p>
-+              ) : (
-+                <ComplaintList items={openComplaints} />
-+              )}
- 
--                {complaints.length === 0 ? (
--                  <p className="py-4 text-center text-sm text-muted-foreground">
--                    {t("reviews.complaintsEmpty")}
-+              <div className="space-y-3 border-t border-border pt-4">
-+                <h3 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-+                  {t("reviews.resolvedComplaints")}
-+                </h3>
-+                {resolvedComplaints.length === 0 ? (
-+                  <p className="py-2 text-center text-sm text-muted-foreground">
-+                    {t("reviews.resolvedEmpty")}
-                   </p>
-                 ) : (
--                  <ul className="space-y-4">
--                    {complaints.map((complaint) => {
--                      const cleaner = cleanerForComplaint(complaint);
--                      return (
--                        <li
--                          key={complaint.key}
--                          className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4"
--                        >
--                          <div className="flex flex-wrap items-start justify-between gap-2">
--                            <div className="min-w-0">
--                              <p className="truncate font-medium">{roomLabel(complaint)}</p>
--                              <p className="text-xs text-muted-foreground">
--                                {t("reviews.cleanedBy")} {cleaner ?? t("reviews.unknownCleaner")} ·{" "}
--                                {t("reviews.on")} {new Date(complaint.reportedAt).toLocaleString()}
--                              </p>
--                            </div>
--                            {complaint.rating != null && <Stars value={complaint.rating} />}
--                          </div>
--
--                          {complaint.shortages.length > 0 && (
--                            <div className="space-y-1">
--                              <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
--                                <PackageMinus className="h-3.5 w-3.5" aria-hidden="true" />
--                                {t("reviews.missingAmenities")}
--                              </p>
--                              <ul className="text-sm">
--                                {complaint.shortages.map((shortage) => (
--                                  <li key={shortage.id}>
--                                    {reviewsQ.data?.amenityNames[shortage.amenity_definition_id] ??
--                                      shortage.amenity_definition_id.slice(0, 8)}
--                                    {": "}
--                                    {shortage.actual_qty} / {shortage.expected_qty_snapshot}
--                                  </li>
--                                ))}
--                              </ul>
--                            </div>
--                          )}
--
--                          {complaint.notes && (
--                            <div className="space-y-1">
--                              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
--                                {t("reviews.guestNotes")}
--                              </p>
--                              <p className="text-sm">{complaint.notes}</p>
--                            </div>
--                          )}
--
--                          {complaint.photos.length > 0 && (
--                            <div className="space-y-1">
--                              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
--                                {t("reviews.hygienePhotos")}
--                              </p>
--                              <div className="flex flex-wrap gap-2">
--                                {complaint.photos.map((photo) => (
--                                  <SignedPhoto
--                                    key={photo.id}
--                                    path={photo.photo_url}
--                                    alt={t("reviews.hygienePhotos")}
--                                    className="h-24 w-24"
--                                  />
--                                ))}
--                              </div>
--                            </div>
--                          )}
--                        </li>
--                      );
--                    })}
--                  </ul>
-+                  <ComplaintList items={resolvedComplaints} />
-                 )}
--              </section>
--            </>
-+              </div>
-+            </section>
-           )}
-         </div>
-       )}
-diff --git a/src/routes/index.tsx b/src/routes/index.tsx
-index 7c6b2f0..f08292f 100644
---- a/src/routes/index.tsx
-+++ b/src/routes/index.tsx
-@@ -1,4 +1,4 @@
--import { createFileRoute, Link } from "@tanstack/react-router";
-+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
- import {
-   CheckCircle2,
-   ClipboardCheck,
-@@ -12,10 +12,12 @@ import {
-   ChevronRight,
-   Menu,
-   X,
-+  KeyRound,
- } from "lucide-react";
- import { useState } from "react";
- 
- import { Button } from "@/components/ui/button";
-+import { Input } from "@/components/ui/input";
- import { LanguageSwitcher } from "@/components/language-switcher";
- import { useT } from "@/i18n";
- import { cn } from "@/lib/utils";
-@@ -46,6 +48,16 @@ export const Route = createFileRoute("/")({
-   component: Landing,
- });
- 
-+/** Anchor targets are fixed ids: deriving them from the translated label
-+ *  produced hrefs like `#功能` that matched no section outside English. */
-+const NAV_LINKS = [
-+  { key: "landing.navFeatures" as const, href: "#features" },
-+  { key: "landing.navHow" as const, href: "#how-it-works" },
-+  { key: "landing.navPricing" as const, href: "#pricing" },
-+  { key: "landing.navFaq" as const, href: "#faq" },
-+  { key: "landing.navGuest" as const, href: "#guest" },
-+];
-+
- const FEATURES = [
-   {
-     icon: ClipboardCheck,
-@@ -194,8 +206,18 @@ const FAQS = [
- 
- function Landing() {
-   const t = useT();
-+  const navigate = useNavigate();
-   const [mobileOpen, setMobileOpen] = useState(false);
-   const [openFaq, setOpenFaq] = useState<number | null>(null);
-+  const [stayCode, setStayCode] = useState("");
-+
-+  // The guest flow already exists at /g/$code; the landing page had no way in.
-+  const openGuestPage = (event: React.FormEvent) => {
-+    event.preventDefault();
-+    const code = stayCode.trim();
-+    if (!code) return;
-+    navigate({ to: "/g/$code", params: { code }, search: {} });
-+  };
- 
-   return (
-     <div className="min-h-screen bg-background">
-@@ -204,13 +226,13 @@ function Landing() {
-         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-           <span className="font-display text-xl font-semibold">{t("app.name")}</span>
-           <div className="hidden items-center gap-1 md:flex">
--            {(["landing.navFeatures", "landing.navHow", "landing.navPricing", "landing.navFaq"] as const).map((key) => (
-+            {NAV_LINKS.map((item) => (
-               <a
--                key={key}
--                href={`#${t(key).toLowerCase().replace(/\s+/g, "-")}`}
-+                key={item.key}
-+                href={item.href}
-                 className="rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-               >
--                {t(key)}
-+                {t(item.key)}
-               </a>
-             ))}
-           </div>
-@@ -236,14 +258,14 @@ function Landing() {
-         {mobileOpen && (
-           <div className="border-t border-border px-4 pb-4 md:hidden">
-             <div className="flex flex-col gap-1 pt-2">
--              {(["landing.navFeatures", "landing.navHow", "landing.navPricing", "landing.navFaq"] as const).map((key) => (
-+              {NAV_LINKS.map((item) => (
-                 <a
--                  key={key}
--                  href={`#${t(key).toLowerCase().replace(/\s+/g, "-")}`}
-+                  key={item.key}
-+                  href={item.href}
-                   className="rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                   onClick={() => setMobileOpen(false)}
-                 >
--                  {t(key)}
-+                  {t(item.key)}
-                 </a>
-               ))}
-               <Link
-@@ -444,6 +466,33 @@ function Landing() {
-           </div>
-         </section>
- 
-+        {/* ---- Guest entry ---- */}
-+        <section id="guest" className="scroll-mt-20 border-b border-border bg-card py-20 md:py-28">
-+          <div className="mx-auto max-w-3xl px-6 text-center">
-+            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
-+              <KeyRound className="h-6 w-6" aria-hidden="true" />
-+            </span>
-+            <h2 className="mt-5 text-3xl font-display md:text-4xl">{t("landing.guestTitle")}</h2>
-+            <p className="mx-auto mt-3 max-w-xl text-muted-foreground">{t("landing.guestBody")}</p>
-+            <form
-+              onSubmit={openGuestPage}
-+              className="mx-auto mt-8 flex max-w-md flex-col gap-3 sm:flex-row"
-+            >
-+              <Input
-+                value={stayCode}
-+                onChange={(e) => setStayCode(e.target.value)}
-+                placeholder={t("landing.guestCode")}
-+                aria-label={t("landing.guestCode")}
-+                autoComplete="off"
-+              />
-+              <Button type="submit" disabled={!stayCode.trim()}>
-+                {t("landing.guestCta")}
-+                <ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" />
-+              </Button>
-+            </form>
-+          </div>
-+        </section>
-+
-         {/* ---- FAQ ---- */}
-         <section id="faq" className="scroll-mt-20 border-b border-border py-20 md:py-28">
-           <div className="mx-auto max-w-3xl px-6">
-@@ -520,6 +569,7 @@ function Landing() {
-                 <li><a href="#features" className="transition-colors hover:text-foreground">{t("landing.featuresLabel")}</a></li>
-                 <li><a href="#pricing" className="transition-colors hover:text-foreground">{t("landing.pricingLabel")}</a></li>
-                 <li><a href="#faq" className="transition-colors hover:text-foreground">{t("landing.faqLabel")}</a></li>
-+                <li><a href="#guest" className="transition-colors hover:text-foreground">{t("landing.navGuest")}</a></li>
-               </ul>
-             </div>
-             <div>
-diff --git a/supabase/migrations/20260811000000_complaint_resolutions.sql b/supabase/migrations/20260811000000_complaint_resolutions.sql
++/** The same cards laid out as a list or as tiles, like the property catalog. */
++export function ComplaintList({
++  items,
++  view,
++  size,
++  ...card
++}: Omit<CardProps, "complaint" | "compact" | "resolution"> & {
++  items: Complaint[];
++  view: ViewMode;
++  size: CardSize;
++  resolutionsByKey: Map<string, ResolutionRow>;
++}) {
++  const { resolutionsByKey, ...rest } = card;
++  return view === "list" ? (
++    <ul className="space-y-4">
++      {items.map((complaint) => (
++        <ComplaintCard
++          key={complaint.key}
++          complaint={complaint}
++          resolution={resolutionsByKey.get(complaint.key)}
++          compact={false}
++          {...rest}
++        />
++      ))}
++    </ul>
++  ) : (
++    <ul className={GRID_COLS[size]}>
++      {items.map((complaint) => (
++        <ComplaintCard
++          key={complaint.key}
++          complaint={complaint}
++          resolution={resolutionsByKey.get(complaint.key)}
++          compact={size === "sm"}
++          {...rest}
++        />
++      ))}
++    </ul>
++  );
++}
+diff --git a/src/components/image-crop-dialog.tsx b/src/components/image-crop-dialog.tsx
 new file mode 100644
-index 0000000..ffe6bf1
 --- /dev/null
-+++ b/supabase/migrations/20260811000000_complaint_resolutions.sql
-@@ -0,0 +1,53 @@
-+-- Owner-resolvable complaints.
-+--
-+-- The reviews page derives a complaint from three different guest artefacts
-+-- (a room-condition submission, a guest session with amenity shortages, or a
-+-- single orphan amenity check). There is no single "complaints" row to flag,
-+-- so resolution state is stored against the stable key the UI already builds
-+-- for each card: `<submissionId>`, `session-<sessionId>` or `check-<checkId>`.
++++ b/src/components/image-crop-dialog.tsx
+@@ -0,0 +1,180 @@
++import { useCallback, useEffect, useRef, useState } from "react";
++import { toast } from "sonner";
 +
-+CREATE TABLE IF NOT EXISTS public.complaint_resolutions (
-+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-+  property_id uuid NOT NULL REFERENCES public.properties(id) ON DELETE CASCADE,
-+  complaint_key text NOT NULL,
-+  resolution_note text,
-+  resolved_by uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-+  resolved_at timestamptz NOT NULL DEFAULT now(),
-+  UNIQUE (complaint_key)
-+);
++import { Button } from "@/components/ui/button";
++import {
++  Dialog,
++  DialogContent,
++  DialogDescription,
++  DialogFooter,
++  DialogHeader,
++  DialogTitle,
++} from "@/components/ui/dialog";
++import { Slider } from "@/components/ui/slider";
++import { useT } from "@/i18n";
 +
-+CREATE INDEX IF NOT EXISTS complaint_resolutions_property_idx
-+  ON public.complaint_resolutions (property_id);
++const FRAME_W = 320; // on-screen editor width in px
++const OUTPUT_W = 1280; // exported width in px
 +
-+GRANT SELECT, INSERT, UPDATE, DELETE ON public.complaint_resolutions TO authenticated;
-+GRANT ALL ON public.complaint_resolutions TO service_role;
++type Loaded = { src: string; image: HTMLImageElement };
 +
-+ALTER TABLE public.complaint_resolutions ENABLE ROW LEVEL SECURITY;
++/**
++ * Rectangular crop dialog used by every non-avatar image field. The frame has
++ * the same aspect ratio as the place the image will be displayed, so what the
++ * user positions here is exactly what the app will show.
++ */
++export function ImageCropDialog({
++  file,
++  aspect,
++  onCancel,
++  onCropped,
++  busy,
++}: {
++  file: File | null;
++  /** width / height of the display area this image fills. */
++  aspect: number;
++  onCancel: () => void;
++  onCropped: (file: File) => void;
++  busy?: boolean;
++}) {
++  const t = useT();
++  const [loaded, setLoaded] = useState<Loaded | null>(null);
++  const [zoom, setZoom] = useState(1);
++  const [offset, setOffset] = useState({ x: 0, y: 0 });
++  const dragRef = useRef<{ x: number; y: number } | null>(null);
 +
-+-- Only the group owner can resolve or reopen a complaint. `resolved_by` is
-+-- pinned to the caller so a row can never be attributed to somebody else.
-+DROP POLICY IF EXISTS "owner resolves complaints" ON public.complaint_resolutions;
-+CREATE POLICY "owner resolves complaints" ON public.complaint_resolutions FOR ALL TO authenticated
-+  USING (public.group_owner_id(public.property_group(property_id)) = auth.uid())
-+  WITH CHECK (
-+    public.group_owner_id(public.property_group(property_id)) = auth.uid()
-+    AND resolved_by = auth.uid()
++  const frameW = FRAME_W;
++  const frameH = Math.round(FRAME_W / aspect);
++
++  const reset = useCallback(() => {
++    setZoom(1);
++    setOffset({ x: 0, y: 0 });
++  }, []);
++
++  useEffect(() => {
++    if (!file) {
++      setLoaded(null);
++      return;
++    }
++    const src = URL.createObjectURL(file);
++    const image = new Image();
++    image.onload = () => {
++      reset();
++      setLoaded({ src, image });
++    };
++    image.onerror = () => {
++      toast.error(t("common.error"));
++      onCancel();
++    };
++    image.src = src;
++    return () => URL.revokeObjectURL(src);
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [file]);
++
++  /** Scale that makes the image cover the whole frame at zoom 1. */
++  const baseScale = loaded
++    ? Math.max(frameW / loaded.image.naturalWidth, frameH / loaded.image.naturalHeight)
++    : 1;
++  const drawW = loaded ? loaded.image.naturalWidth * baseScale * zoom : 0;
++  const drawH = loaded ? loaded.image.naturalHeight * baseScale * zoom : 0;
++
++  const clamp = (o: { x: number; y: number }) => {
++    const maxX = Math.max(0, (drawW - frameW) / 2);
++    const maxY = Math.max(0, (drawH - frameH) / 2);
++    return {
++      x: Math.min(maxX, Math.max(-maxX, o.x)),
++      y: Math.min(maxY, Math.max(-maxY, o.y)),
++    };
++  };
++  const safeOffset = clamp(offset);
++
++  async function confirm() {
++    if (!loaded) return;
++    const outW = OUTPUT_W;
++    const outH = Math.round(OUTPUT_W / aspect);
++    const canvas = document.createElement("canvas");
++    canvas.width = outW;
++    canvas.height = outH;
++    const ctx = canvas.getContext("2d");
++    if (!ctx) return;
++    const ratio = outW / frameW;
++    ctx.drawImage(
++      loaded.image,
++      (frameW / 2 - drawW / 2 + safeOffset.x) * ratio,
++      (frameH / 2 - drawH / 2 + safeOffset.y) * ratio,
++      drawW * ratio,
++      drawH * ratio,
++    );
++    const blob = await new Promise<Blob | null>((resolve) =>
++      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.9),
++    );
++    if (!blob) {
++      toast.error(t("common.error"));
++      return;
++    }
++    onCropped(new File([blob], "image.jpg", { type: "image/jpeg" }));
++  }
++
++  return (
++    <Dialog open={!!file} onOpenChange={(open) => (!open ? onCancel() : undefined)}>
++      <DialogContent className="sm:max-w-md">
++        <DialogHeader>
++          <DialogTitle>{t("crop.title")}</DialogTitle>
++          <DialogDescription>{t("crop.help")}</DialogDescription>
++        </DialogHeader>
++
++        <div
++          className="relative mx-auto touch-none select-none overflow-hidden rounded-lg bg-muted"
++          style={{ width: frameW, height: frameH }}
++          onPointerDown={(e) => {
++            dragRef.current = { x: e.clientX - safeOffset.x, y: e.clientY - safeOffset.y };
++            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
++          }}
++          onPointerMove={(e) => {
++            if (!dragRef.current) return;
++            setOffset(clamp({ x: e.clientX - dragRef.current.x, y: e.clientY - dragRef.current.y }));
++          }}
++          onPointerUp={() => {
++            dragRef.current = null;
++          }}
++        >
++          {loaded && (
++            <img
++              src={loaded.src}
++              alt=""
++              draggable={false}
++              className="pointer-events-none absolute left-1/2 top-1/2 max-w-none"
++              style={{
++                width: drawW,
++                height: drawH,
++                transform: `translate(calc(-50% + ${safeOffset.x}px), calc(-50% + ${safeOffset.y}px))`,
++              }}
++            />
++          )}
++          <div className="pointer-events-none absolute inset-0 rounded-lg border-2 border-primary/70" />
++        </div>
++
++        <div className="space-y-2">
++          <p className="text-xs text-muted-foreground">{t("avatar.zoom")}</p>
++          <Slider
++            value={[zoom]}
++            min={1}
++            max={3}
++            step={0.01}
++            onValueChange={([v]) => setZoom(v)}
++            aria-label={t("avatar.zoom")}
++          />
++        </div>
++
++        <DialogFooter>
++          <Button type="button" variant="ghost" onClick={onCancel}>
++            {t("common.cancel")}
++          </Button>
++          <Button type="button" disabled={busy || !loaded} onClick={() => confirm()}>
++            {t("crop.apply")}
++          </Button>
++        </DialogFooter>
++      </DialogContent>
++    </Dialog>
++  );
++}
+diff --git a/src/routes/_authenticated/reviews-archive.tsx b/src/routes/_authenticated/reviews-archive.tsx
+new file mode 100644
+--- /dev/null
++++ b/src/routes/_authenticated/reviews-archive.tsx
+@@ -0,0 +1,186 @@
++import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
++import { ArrowLeft } from "lucide-react";
++import { useState } from "react";
++
++import { ListSkeleton, PageHeader } from "@/components/app-shell";
++import { ComplaintList } from "@/components/complaint-card";
++import { Label } from "@/components/ui/label";
++import {
++  Select,
++  SelectContent,
++  SelectItem,
++  SelectTrigger,
++  SelectValue,
++} from "@/components/ui/select";
++import { ViewToggle, useViewPrefs, type CardSize, type ViewMode } from "@/components/view-toggle";
++import { useActiveGroup, useProfile } from "@/hooks/use-app";
++import { makeNamers, useComplaintsData, useSplitComplaints } from "@/hooks/use-complaints";
++import { useT } from "@/i18n";
++
++export const Route = createFileRoute("/_authenticated/reviews-archive")({
++  head: () => ({
++    meta: [
++      { title: "Resolved complaints — Keyward" },
++      { name: "description", content: "Every complaint that has been closed out." },
++      { property: "og:title", content: "Resolved complaints — Keyward" },
++      { property: "og:description", content: "Every complaint that has been closed out." },
++      { name: "robots", content: "noindex" },
++    ],
++  }),
++  component: ComplaintArchivePage,
++});
++
++const ANY = "__any";
++
++function ComplaintArchivePage() {
++  const t = useT();
++  const { groupId } = useActiveGroup();
++  const { data: profile, isLoading: profileLoading } = useProfile();
++
++  // Same arrangement control (and stored preference) as the complaints tab.
++  const prefs = useViewPrefs("complaints");
++  const initialPrefs = prefs.read();
++  const [view, setView] = useState<ViewMode>(initialPrefs.view);
++  const [size, setSize] = useState<CardSize>(initialPrefs.size);
++
++  const [property, setProperty] = useState(ANY);
++  const [cleaner, setCleaner] = useState(ANY);
++  const [stars, setStars] = useState(ANY);
++  const [amenity, setAmenity] = useState(ANY);
++
++  const reviewsQ = useComplaintsData(groupId);
++  const { resolved, resolutionsByKey } = useSplitComplaints(reviewsQ.data);
++  const { propertyName, personName } = makeNamers(reviewsQ.data);
++
++  if (
++    !profileLoading &&
++    profile?.primary_role !== "owner" &&
++    profile?.primary_role !== "hr_company"
++  ) {
++    return <Navigate to="/dashboard" replace />;
++  }
++
++  const cleanerIds = Array.from(
++    new Set(resolved.map((complaint) => complaint.cleanerUserId).filter((id): id is string => !!id)),
 +  );
 +
-+-- Everyone who can already see the complaint can see that it was handled.
-+DROP POLICY IF EXISTS "members read complaint resolutions" ON public.complaint_resolutions;
-+CREATE POLICY "members read complaint resolutions" ON public.complaint_resolutions FOR SELECT TO authenticated
-+  USING (public.is_group_member(public.property_group(property_id)));
++  const items = resolved.filter((complaint) => {
++    if (property !== ANY && complaint.propertyId !== property) return false;
++    if (cleaner !== ANY && complaint.cleanerUserId !== cleaner) return false;
++    if (stars !== ANY && String(complaint.rating ?? 0) !== stars) return false;
++    if (amenity === "with" && complaint.shortages.length + complaint.unreported.length === 0)
++      return false;
++    if (amenity === "without" && complaint.shortages.length + complaint.unreported.length > 0)
++      return false;
++    return true;
++  });
 +
-+DROP POLICY IF EXISTS "hr reads complaint resolutions" ON public.complaint_resolutions;
-+CREATE POLICY "hr reads complaint resolutions" ON public.complaint_resolutions FOR SELECT TO authenticated
-+  USING (public.is_hr_affiliated(public.property_group(property_id)));
++  const filter = (
++    id: string,
++    label: string,
++    value: string,
++    onValue: (v: string) => void,
++    options: { value: string; label: string }[],
++  ) => (
++    <div className="space-y-1.5">
++      <Label htmlFor={id}>{label}</Label>
++      <Select value={value} onValueChange={onValue}>
++        <SelectTrigger id={id}>
++          <SelectValue />
++        </SelectTrigger>
++        <SelectContent>
++          <SelectItem value={ANY}>{t("reviews.filterAll")}</SelectItem>
++          {options.map((option) => (
++            <SelectItem key={option.value} value={option.value}>
++              {option.label}
++            </SelectItem>
++          ))}
++        </SelectContent>
++      </Select>
++    </div>
++  );
 +
-+-- Realtime so a resolution made in one tab updates the other.
-+DO $$
++  return (
++    <>
++      <Link
++        to="/reviews"
++        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
++      >
++        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
++        {t("common.back")}
++      </Link>
++      <PageHeader title={t("reviews.archiveTitle")} description={t("reviews.archiveSubtitle")} />
++
++      <section className="surface space-y-4 p-5">
++        <header className="flex flex-wrap items-center justify-between gap-3">
++          <p className="text-sm text-muted-foreground">
++            {items.length} {t("reviews.resolvedComplaints").toLowerCase()}
++          </p>
++          <ViewToggle
++            view={view}
++            onView={(v) => {
++              setView(v);
++              prefs.write({ view: v, size });
++            }}
++            size={size}
++            onSize={(s) => {
++              setSize(s);
++              prefs.write({ view, size: s });
++            }}
++          />
++        </header>
++
++        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
++          {filter(
++            "filter-property",
++            t("reviews.filterProperty"),
++            property,
++            setProperty,
++            (reviewsQ.data?.properties ?? []).map((row) => ({
++              value: row.id,
++              label: propertyName(row.id),
++            })),
++          )}
++          {filter(
++            "filter-cleaner",
++            t("reviews.filterCleaner"),
++            cleaner,
++            setCleaner,
++            cleanerIds.map((id) => ({ value: id, label: personName(id) ?? id.slice(0, 8) })),
++          )}
++          {filter(
++            "filter-stars",
++            t("reviews.filterStars"),
++            stars,
++            setStars,
++            [5, 4, 3, 2, 1, 0].map((value) => ({
++              value: String(value),
++              label: value === 0 ? t("reviews.noRating") : `${value}★`,
++            })),
++          )}
++          {filter("filter-amenity", t("reviews.filterAmenity"), amenity, setAmenity, [
++            { value: "with", label: t("reviews.amenityProblem") },
++            { value: "without", label: t("reviews.amenityFine") },
++          ])}
++        </div>
++
++        {reviewsQ.isLoading ? (
++          <ListSkeleton rows={5} />
++        ) : items.length === 0 ? (
++          <p className="py-8 text-center text-sm text-muted-foreground">
++            {t("reviews.archiveEmpty")}
++          </p>
++        ) : (
++          <ComplaintList
++            items={items}
++            view={view}
++            size={size}
++            data={reviewsQ.data}
++            resolutionsByKey={resolutionsByKey}
++            canResolve={false}
++          />
++        )}
++      </section>
++    </>
++  );
++}
+diff --git a/supabase/migrations/20260812000000_air_round2_fixes.sql b/supabase/migrations/20260812000000_air_round2_fixes.sql
+new file mode 100644
+--- /dev/null
++++ b/supabase/migrations/20260812000000_air_round2_fixes.sql
+@@ -0,0 +1,137 @@
++-- Round 2 fixes: notification duplicates, per-role activity, history clearing.
++
++-- 1. Duplicate notifications ------------------------------------------------
++-- The original schema shipped catch-all triggers that were later replaced by
++-- per-event triggers; both fired, so every event produced two rows.
++DROP TRIGGER IF EXISTS trg_notify_jobs ON public.cleaning_jobs;
++DROP TRIGGER IF EXISTS trg_notify_discrepancy ON public.amenity_checks;
++DROP TRIGGER IF EXISTS trg_notify_order_proof ON public.shopping_orders;
++
++-- Belt and braces: never store the same unread notification twice in a row.
++CREATE OR REPLACE FUNCTION public.notify_user(
++  p_user_id uuid,
++  p_type text,
++  p_payload jsonb
++) RETURNS void
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public
++AS $$
 +BEGIN
-+  BEGIN
-+    ALTER PUBLICATION supabase_realtime ADD TABLE public.complaint_resolutions;
-+  EXCEPTION WHEN duplicate_object THEN NULL;
-+  END;
-+END $$;
++  IF p_user_id IS NULL THEN
++    RETURN;
++  END IF;
++
++  IF EXISTS (
++    SELECT 1 FROM public.notifications n
++    WHERE n.user_id = p_user_id
++      AND n.type = p_type
++      AND n.payload = p_payload
++      AND n.read = false
++      AND n.created_at > now() - interval '5 minutes'
++  ) THEN
++    RETURN;
++  END IF;
++
++  INSERT INTO public.notifications(user_id, type, payload, target_url)
++  VALUES (p_user_id, p_type, p_payload, public.notification_target_url(p_type, p_payload));
++END;
++$$;
++
++-- 2. Activity log: owner and cleaning company are separate entities ---------
++ALTER TABLE public.activity_log ADD COLUMN IF NOT EXISTS actor_role text;
++
++CREATE OR REPLACE FUNCTION public.activity_log_set_actor_role()
++RETURNS trigger
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public
++AS $$
++BEGIN
++  IF NEW.actor_role IS NULL AND NEW.actor_user_id IS NOT NULL THEN
++    SELECT p.primary_role INTO NEW.actor_role
++    FROM public.profiles p
++    WHERE p.user_id = NEW.actor_user_id;
++  END IF;
++  RETURN NEW;
++END;
++$$;
++
++DROP TRIGGER IF EXISTS trg_activity_log_actor_role ON public.activity_log;
++CREATE TRIGGER trg_activity_log_actor_role
++  BEFORE INSERT ON public.activity_log
++  FOR EACH ROW EXECUTE FUNCTION public.activity_log_set_actor_role();
++
++UPDATE public.activity_log a
++SET actor_role = p.primary_role
++FROM public.profiles p
++WHERE a.actor_role IS NULL AND p.user_id = a.actor_user_id;
++
++CREATE INDEX IF NOT EXISTS activity_log_actor_role_idx ON public.activity_log(actor_role);
++
++-- 3. Clearing history -------------------------------------------------------
++-- Nothing is deleted: rows are archived so reports and audits stay intact.
++ALTER TABLE public.cleaning_jobs ADD COLUMN IF NOT EXISTS archived_at timestamptz;
++ALTER TABLE public.tasks ADD COLUMN IF NOT EXISTS archived_at timestamptz;
++ALTER TABLE public.complaint_resolutions ADD COLUMN IF NOT EXISTS archived_at timestamptz;
++
++CREATE OR REPLACE FUNCTION public.clear_history(p_group uuid, p_scope text)
++RETURNS integer
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public
++AS $$
++DECLARE
++  v_owner uuid;
++  v_count integer := 0;
++  v_rows integer;
++BEGIN
++  SELECT owner_user_id INTO v_owner FROM public.owner_groups WHERE id = p_group;
++  IF v_owner IS NULL OR v_owner <> auth.uid() THEN
++    RAISE EXCEPTION 'Only the group owner can clear history';
++  END IF;
++
++  IF p_scope IN ('complaints', 'all') THEN
++    UPDATE public.complaint_resolutions r
++    SET archived_at = now()
++    FROM public.properties p
++    WHERE p.id = r.property_id
++      AND p.owner_group_id = p_group
++      AND r.archived_at IS NULL;
++    GET DIAGNOSTICS v_rows = ROW_COUNT;
++    v_count := v_count + v_rows;
++  END IF;
++
++  IF p_scope IN ('cleaning', 'all') THEN
++    UPDATE public.cleaning_jobs
++    SET archived_at = now()
++    WHERE owner_group_id = p_group
++      AND status = 'reviewed'
++      AND archived_at IS NULL;
++    GET DIAGNOSTICS v_rows = ROW_COUNT;
++    v_count := v_count + v_rows;
++  END IF;
++
++  IF p_scope IN ('tasks', 'all') THEN
++    UPDATE public.tasks
++    SET archived_at = now()
++    WHERE owner_group_id = p_group
++      AND status = 'done'
++      AND archived_at IS NULL;
++    GET DIAGNOSTICS v_rows = ROW_COUNT;
++    v_count := v_count + v_rows;
++  END IF;
++
++  IF p_scope = 'all' THEN
++    DELETE FROM public.activity_log
++    WHERE owner_group_id = p_group;
++    GET DIAGNOSTICS v_rows = ROW_COUNT;
++    v_count := v_count + v_rows;
++  END IF;
++
++  RETURN v_count;
++END;
++$$;
++
++REVOKE ALL ON FUNCTION public.clear_history(uuid, text) FROM public;
++GRANT EXECUTE ON FUNCTION public.clear_history(uuid, text) TO authenticated;

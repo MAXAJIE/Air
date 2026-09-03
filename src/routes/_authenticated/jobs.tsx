@@ -362,7 +362,7 @@ function ChecklistPanel({ jobId, readOnly }: { jobId: string; readOnly: boolean 
               </span>
             )}
           </label>
-          {!readOnly && (
+          {!readOnly && item.requires_photo && (
             <div className="mt-2">
               <PhotoPicker
                 value={item.photo_url}
