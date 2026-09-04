@@ -81,8 +81,7 @@ export const reverseGeocode = createServerFn({ method: "POST" })
  */
 export const approximateLocation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(
-  async (): Promise<{ result: GeoResult | null }> => {
+  .handler(async (): Promise<{ result: GeoResult | null }> => {
     const request = getRequest();
     const clientIp =
       request.headers.get("cf-connecting-ip") ??
@@ -90,33 +89,63 @@ export const approximateLocation = createServerFn({ method: "POST" })
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
       null;
 
-    const url = clientIp ? `https://ipapi.co/${clientIp}/json/` : "https://ipapi.co/json/";
-    try {
-      const response = await fetch(url, { headers: { "User-Agent": "keyward-app/1.0 (ip locate)" } });
-      if (!response.ok) return { result: null };
-      const json = (await response.json()) as {
-        latitude?: number;
-        longitude?: number;
-        city?: string;
-        region?: string;
-        country_name?: string;
-        error?: boolean;
-      };
-      if (json.error || typeof json.latitude !== "number" || typeof json.longitude !== "number") {
-        return { result: null };
-      }
-      const parts = [json.city, json.region, json.country_name].filter(Boolean) as string[];
-      return {
-        result: {
-          id: "ip",
-          label: json.city || "Approximate location",
-          address: parts.join(", "),
-          lat: json.latitude,
-          lng: json.longitude,
-        },
-      };
-    } catch (error) {
-      console.error("IP location lookup failed", error);
-      return { result: null };
+    // Cloudflare already geolocates the request, so use that before any
+    // third-party lookup — it never rate-limits and never blocks us.
+    const fromEdge = edgeLocation(request.headers);
+    if (fromEdge) return { result: fromEdge };
+
+    // Free IP providers rate-limit and go down; try them in turn.
+    const endpoints = clientIp
+      ? [`https://ipapi.co/${clientIp}/json/`, `https://ipwho.is/${clientIp}`, `https://get.geojs.io/v1/ip/geo/${clientIp}.json`]
+      : ["https://ipapi.co/json/", "https://ipwho.is/", "https://get.geojs.io/v1/ip/geo.json"];
+
+    for (const url of endpoints) {
+      const result = await lookupIp(url);
+      if (result) return { result };
     }
+    return { result: null };
   });
+
+/** Cloudflare puts an approximate fix on every request it forwards. */
+function edgeLocation(headers: Headers): GeoResult | null {
+  const lat = Number(headers.get("cf-iplatitude"));
+  const lng = Number(headers.get("cf-iplongitude"));
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null;
+  const parts = [headers.get("cf-ipcity"), headers.get("cf-region"), headers.get("cf-ipcountry")].filter(
+    Boolean,
+  ) as string[];
+  return {
+    id: "edge",
+    label: headers.get("cf-ipcity") || "Approximate location",
+    address: parts.join(", "),
+    lat,
+    lng,
+  };
+}
+
+/** Normalises the three provider shapes into one GeoResult. */
+async function lookupIp(url: string): Promise<GeoResult | null> {
+  try {
+    const response = await fetch(url, { headers: { "User-Agent": "keyward-app/1.0 (ip locate)" } });
+    if (!response.ok) return null;
+    const json = (await response.json()) as Record<string, unknown>;
+    if (json.error || json.success === false) return null;
+    const lat = Number(json.latitude ?? json.lat);
+    const lng = Number(json.longitude ?? json.lon ?? json.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const city = (json.city as string) || "";
+    const region = (json.region as string) || "";
+    const country = (json.country_name as string) || (json.country as string) || "";
+    const parts = [city, region, country].filter(Boolean);
+    return {
+      id: "ip",
+      label: city || "Approximate location",
+      address: parts.join(", "),
+      lat,
+      lng,
+    };
+  } catch (error) {
+    console.error(`IP location lookup failed for ${url}`, error);
+    return null;
+  }
+}

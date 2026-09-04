@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthUser } from "@/hooks/use-app";
 import { supabase } from "@/integrations/supabase/client";
 
-type NotificationType =
+export type NotificationType =
   | "job_submitted"
   | "job_assigned"
   | "job_reviewed"
@@ -70,6 +70,30 @@ export const NOTIF_TO_ROUTE: Record<NotificationType, string> = {
   hygiene_complaint: "/reviews",
   low_rating: "/reviews",
 };
+
+/**
+ * Some routes host more than one surface. Opening the shopping tab must not
+ * silence a special-request alert, so these types also declare the section
+ * they belong to and are only cleared while that section is on screen.
+ */
+export const NOTIF_TO_SECTION: Partial<Record<NotificationType, string>> = {
+  special_request: "requests",
+  payment_proof: "shop",
+  amenity_discrepancy: "complaints",
+  hygiene_complaint: "complaints",
+  low_rating: "complaints",
+};
+
+/** Unread count for one route + section pair, used for in-page badges. */
+export function countForSection(
+  notifications: AppNotification[] | undefined,
+  route: string,
+  section: string,
+): number {
+  return (notifications ?? []).filter(
+    (n) => NOTIF_TO_ROUTE[n.type] === route && NOTIF_TO_SECTION[n.type] === section,
+  ).length;
+}
 
 /**
  * Derive a notification's navigation URL from its type and payload.
@@ -180,17 +204,20 @@ export function useMarkAllRead() {
 }
 
 /**
- * Mark all unread notifications for a given route as read.
+ * Mark unread notifications for a route as read — and, when the route has
+ * sections, only the ones belonging to the section currently on screen.
  */
 export function useMarkRouteRead() {
   const qc = useQueryClient();
   const { data: user } = useAuthUser();
 
   return useMutation({
-    mutationFn: async (route: string) => {
-      const types = Object.entries(NOTIF_TO_ROUTE)
-        .filter(([, r]) => r === route)
-        .map(([type]) => type);
+    mutationFn: async ({ route, section }: { route: string; section?: string }) => {
+      const types = (Object.keys(NOTIF_TO_ROUTE) as NotificationType[]).filter((type) => {
+        if (NOTIF_TO_ROUTE[type] !== route) return false;
+        const needed = NOTIF_TO_SECTION[type];
+        return needed === undefined || needed === section;
+      });
 
       if (types.length === 0) return;
 

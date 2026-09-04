@@ -247,6 +247,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  // Sectioned pages (shop / requests, reviews / complaints) report which
+  // surface is open so only that section's notifications are cleared.
+  const section = useRouterState({
+    select: (s) => (s.location.search as { section?: string }).section,
+  });
   const { data: profile } = useProfile();
   const { groups, groupId, setGroupId, loading } = useActiveGroup();
   const [confirmOut, setConfirmOut] = useState(false);
@@ -263,7 +268,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (!notifications || !pathname) return;
     // Keyed on the unread ids too: a notification that arrives while the user
     // is already sitting on the target page must still be marked as read.
-    const stamp = `${pathname}|${notifications.map((n) => n.id).join(",")}`;
+    const stamp = `${pathname}|${section ?? ""}|${notifications.map((n) => n.id).join(",")}`;
     if (stamp === lastMarkedPath) return;
 
     const matchingRoute = Object.values(NOTIF_TO_ROUTE).find((route) =>
@@ -271,10 +276,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
 
     if (matchingRoute) {
-      markRouteRead.mutate(matchingRoute);
+      markRouteRead.mutate({ route: matchingRoute, section });
       setLastMarkedPath(stamp);
     }
-  }, [pathname, notifications, lastMarkedPath, markRouteRead]);
+  }, [pathname, section, notifications, lastMarkedPath, markRouteRead]);
 
   const role: AppRole = profile?.primary_role ?? "owner";
   const nav = NAV[role];

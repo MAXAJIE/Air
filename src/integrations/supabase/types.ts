@@ -508,23 +508,38 @@ export type Database = {
       }
       customer_sessions: {
         Row: {
+          check_in_at: string | null
+          checked_out_at: string | null
+          contact_number: string | null
           created_at: string
           expires_at: string
+          guest_name: string | null
           id: string
+          party_size: number | null
           property_id: string
           room_code: string
         }
         Insert: {
+          check_in_at?: string | null
+          checked_out_at?: string | null
+          contact_number?: string | null
           created_at?: string
           expires_at?: string
+          guest_name?: string | null
           id?: string
+          party_size?: number | null
           property_id: string
           room_code: string
         }
         Update: {
+          check_in_at?: string | null
+          checked_out_at?: string | null
+          contact_number?: string | null
           created_at?: string
           expires_at?: string
+          guest_name?: string | null
           id?: string
+          party_size?: number | null
           property_id?: string
           room_code?: string
         }
@@ -534,6 +549,32 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      group_settings: {
+        Row: {
+          complaint_star_threshold: number
+          owner_group_id: string
+          updated_at: string
+        }
+        Insert: {
+          complaint_star_threshold?: number
+          owner_group_id: string
+          updated_at?: string
+        }
+        Update: {
+          complaint_star_threshold?: number
+          owner_group_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_settings_owner_group_id_fkey"
+            columns: ["owner_group_id"]
+            isOneToOne: true
+            referencedRelation: "owner_groups"
             referencedColumns: ["id"]
           },
         ]
@@ -898,6 +939,7 @@ export type Database = {
         Row: {
           access_code: string | null
           address: string | null
+          complaint_star_threshold: number | null
           created_at: string
           default_template_id: string | null
           id: string
@@ -912,6 +954,7 @@ export type Database = {
         Insert: {
           access_code?: string | null
           address?: string | null
+          complaint_star_threshold?: number | null
           created_at?: string
           default_template_id?: string | null
           id?: string
@@ -926,6 +969,7 @@ export type Database = {
         Update: {
           access_code?: string | null
           address?: string | null
+          complaint_star_threshold?: number | null
           created_at?: string
           default_template_id?: string | null
           id?: string
@@ -1021,6 +1065,7 @@ export type Database = {
       }
       room_condition_submissions: {
         Row: {
+          complaint: string | null
           customer_session_id: string | null
           id: string
           notes: string | null
@@ -1029,6 +1074,7 @@ export type Database = {
           submitted_at: string
         }
         Insert: {
+          complaint?: string | null
           customer_session_id?: string | null
           id?: string
           notes?: string | null
@@ -1037,6 +1083,7 @@ export type Database = {
           submitted_at?: string
         }
         Update: {
+          complaint?: string | null
           customer_session_id?: string | null
           id?: string
           notes?: string | null

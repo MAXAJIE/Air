@@ -103,6 +103,15 @@ export function ComplaintCard({
         </div>
       )}
 
+      {complaint.complaint && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium uppercase tracking-wide text-destructive">
+            {t("reviews.guestComplaint")}
+          </p>
+          <p className={cn("text-sm", compact && "line-clamp-3")}>{complaint.complaint}</p>
+        </div>
+      )}
+
       {complaint.notes && (
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

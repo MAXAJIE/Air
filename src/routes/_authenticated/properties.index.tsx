@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ExternalLink, Filter, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Filter, MapPin, Plus, Settings, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -231,7 +231,7 @@ function PropertiesPage() {
         title={t("prop.settings")}
         onClick={() => navigate({ to: "/properties/$propertyId", params: { propertyId: p.id } })}
       >
-        <Pencil className="h-4 w-4" aria-hidden="true" />
+        <Settings className="h-4 w-4" aria-hidden="true" />
       </Button>
       <Button
         variant="ghost"

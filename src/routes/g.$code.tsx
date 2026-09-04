@@ -13,10 +13,25 @@ import {
   HelpCircle,
   ImagePlus,
   X,
+  CalendarClock,
+  History,
+  LogOut,
+  Phone,
+  Users,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,15 +40,56 @@ import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { fileToBase64 } from "@/lib/files";
 import {
+  checkoutGuestSession,
   createShoppingOrder,
   createSpecialRequest,
+  getGuestActivity,
   getGuestContext,
   rateCleaner,
+  saveGuestCheckIn,
   startGuestSession,
   submitRoomCondition,
 } from "@/lib/guest.functions";
 import { cn } from "@/lib/utils";
 import { formatPrice } from "@/lib/format-price";
+
+/**
+ * The welcome checklist is a per-session, per-device thing: the guest may skip
+ * it, and skipping must survive a refresh without another round-trip.
+ */
+function checkInKey(sessionId: string) {
+  return `guest-checkin:${sessionId}`;
+}
+
+function hasCheckedIn(sessionId: string) {
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem(checkInKey(sessionId)) === "1";
+}
+
+/**
+ * Checking out closes the stay but must not erase what the guest did: the
+ * device remembers its past session ids so history survives a checkout.
+ */
+function sessionsKey(propertyId: string) {
+  return `guest-sessions:${propertyId}`;
+}
+
+function readSessions(propertyId: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(sessionsKey(propertyId));
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberSession(propertyId: string, sessionId: string) {
+  if (typeof window === "undefined") return;
+  const next = [sessionId, ...readSessions(propertyId).filter((id) => id !== sessionId)].slice(0, 30);
+  window.localStorage.setItem(sessionsKey(propertyId), JSON.stringify(next));
+}
 
 export const Route = createFileRoute("/g/$code")({
   ssr: false,
@@ -60,7 +116,7 @@ type GuestProperty = {
   photo_path: string | null;
 };
 
-type ViewState = "loading" | "menu" | "condition" | "request" | "shop" | "rate" | "thanksCondition" | "thanksRequest" | "thanksShop" | "thanksRate" | "expired" | "error";
+type ViewState = "loading" | "welcome" | "history" | "menu" | "condition" | "request" | "shop" | "rate" | "thanksCondition" | "thanksRequest" | "thanksShop" | "thanksRate" | "expired" | "error";
 
 type SessionState = {
   sessionId: string;
@@ -301,9 +357,10 @@ function GuestByCodePage() {
     }
 
     if (effectiveSessionId && contextQ.data) {
+      if (propertyQ.data) rememberSession(propertyQ.data.id, effectiveSessionId);
       setSession({ sessionId: effectiveSessionId, propertyName: contextQ.data.propertyName });
       setContext(contextQ.data);
-      setView("menu");
+      setView(hasCheckedIn(effectiveSessionId) ? "menu" : "welcome");
     }
   }, [
     view,
@@ -321,6 +378,33 @@ function GuestByCodePage() {
   ]);
 
   const property = propertyQ.data;
+
+  // A checkout closes the stay for the owner and hands this device a fresh
+  // session. Past sessions stay in the device's history list.
+  const checkout = useMutation({
+    mutationFn: async () => {
+      if (!session || !property) throw new Error("No active stay");
+      return checkoutGuestSession({
+        data: { propertyId: property.id, sessionId: session.sessionId },
+      });
+    },
+    onSuccess: (result) => {
+      if (typeof window !== "undefined" && property) {
+        window.localStorage.removeItem(checkInKey(session!.sessionId));
+        rememberSession(property.id, result.sessionId);
+      }
+      toast.success(t("guest.checkoutDone"));
+      navigate({
+        to: "/g/$code",
+        params: { code },
+        search: { session: result.sessionId },
+        replace: true,
+      });
+      if (typeof window !== "undefined") window.location.reload();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
 
   // ---- The page is loading ----
   if (view === "loading") {
@@ -440,7 +524,7 @@ function GuestByCodePage() {
   // ---- Main flow: menu or sub-views ----
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-4 py-10">
-      {view !== "menu" && (
+      {view !== "menu" && view !== "welcome" && (
         <button
           type="button"
           onClick={() => setView("menu")}
@@ -451,6 +535,24 @@ function GuestByCodePage() {
         </button>
       )}
 
+      {view === "welcome" && session && property && (
+        <WelcomeChecklist
+          propertyId={property.id}
+          sessionId={session.sessionId}
+          propertyName={property.name}
+          onDone={() => {
+            if (typeof window !== "undefined") {
+              window.localStorage.setItem(checkInKey(session.sessionId), "1");
+            }
+            setView("menu");
+          }}
+        />
+      )}
+
+      {view === "history" && session && property && (
+        <HistoryView propertyId={property.id} sessionId={session.sessionId} />
+      )}
+
       {view === "menu" && (
         <MenuView
           propertyName={property?.name ?? ""}
@@ -459,6 +561,9 @@ function GuestByCodePage() {
           onCondition={() => setView("condition")}
           onRequest={() => setView("request")}
           onShop={() => setView("shop")}
+          onHistory={() => setView("history")}
+          onCheckout={() => checkout.mutate()}
+          checkingOut={checkout.isPending}
         />
       )}
 
@@ -512,6 +617,260 @@ function GuestByCodePage() {
 /* ------------------------------------------------------------------ */
 /*  Menu view — 3 choice cards + optional cleaner rate                 */
 /* ------------------------------------------------------------------ */
+/*  Welcome checklist — one question at a time before the main menu     */
+/* ------------------------------------------------------------------ */
+type CheckInDraft = {
+  guestName: string;
+  partySize: string;
+  checkInAt: string;
+  contactNumber: string;
+};
+
+/** `datetime-local` wants local `YYYY-MM-DDTHH:mm`, not a UTC ISO string. */
+function localNow() {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 16);
+}
+
+function WelcomeChecklist({
+  propertyId,
+  sessionId,
+  propertyName,
+  onDone,
+}: {
+  propertyId: string;
+  sessionId: string;
+  propertyName: string;
+  onDone: () => void;
+}) {
+  const t = useT();
+  const [step, setStep] = useState(0);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [draft, setDraft] = useState<CheckInDraft>({
+    guestName: "",
+    partySize: "1",
+    checkInAt: "",
+    contactNumber: "",
+  });
+
+  const steps = [
+    {
+      key: "guestName" as const,
+      icon: Star,
+      title: t("guest.checkin.nameTitle"),
+      hint: t("guest.checkin.nameHint"),
+      valid: draft.guestName.trim().length > 0,
+    },
+    {
+      key: "partySize" as const,
+      icon: Users,
+      title: t("guest.checkin.partyTitle"),
+      hint: t("guest.checkin.partyHint"),
+      valid: Number(draft.partySize) >= 1,
+    },
+    {
+      key: "checkInAt" as const,
+      icon: CalendarClock,
+      title: t("guest.checkin.whenTitle"),
+      hint: t("guest.checkin.whenHint"),
+      valid: draft.checkInAt.trim().length > 0,
+    },
+    {
+      key: "contactNumber" as const,
+      icon: Phone,
+      title: t("guest.checkin.phoneTitle"),
+      hint: t("guest.checkin.phoneHint"),
+      valid: draft.contactNumber.trim().length >= 3,
+    },
+  ];
+
+  const current = steps[step];
+  const isLast = step === steps.length - 1;
+
+  const save = useMutation({
+    mutationFn: async () =>
+      saveGuestCheckIn({
+        data: {
+          propertyId,
+          sessionId,
+          guestName: draft.guestName.trim(),
+          partySize: Number(draft.partySize),
+          checkInAt: draft.checkInAt,
+          contactNumber: draft.contactNumber.trim(),
+        },
+      }),
+    onSuccess: () => {
+      toast.success(t("guest.checkin.saved"));
+      onDone();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const advance = () => (isLast ? save.mutate() : setStep((value) => value + 1));
+
+  return (
+    <div className="relative flex min-h-[70vh] flex-col justify-center">
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        aria-label={t("common.close")}
+        className="absolute right-0 top-0 h-8 w-8"
+        onClick={() => setConfirmClose(true)}
+      >
+        <X className="h-4 w-4" aria-hidden="true" />
+      </Button>
+
+      <header className="mb-8 text-center">
+        <h1 className="text-2xl font-semibold">{propertyName}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t("guest.checkin.intro")}</p>
+      </header>
+
+      <div className="mb-6 flex justify-center gap-2" aria-hidden="true">
+        {steps.map((entry, index) => (
+          <span
+            key={entry.key}
+            className={cn(
+              "h-1.5 rounded-full transition-all duration-300",
+              index === step ? "w-8 bg-primary" : index < step ? "w-6 bg-primary" : "w-6 bg-muted",
+            )}
+          />
+        ))}
+      </div>
+
+      {/* Remounting on the step key replays the entrance animation per question. */}
+      <div
+        key={current.key}
+        className="animate-fade-in space-y-4 rounded-xl border border-border bg-card p-5"
+      >
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <current.icon className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <div>
+            <p className="font-medium">{current.title}</p>
+            <p className="text-sm text-muted-foreground">{current.hint}</p>
+          </div>
+        </div>
+
+        {current.key === "checkInAt" ? (
+          <div className="flex gap-2">
+            <Input
+              type="datetime-local"
+              value={draft.checkInAt}
+              onChange={(e) => setDraft((d) => ({ ...d, checkInAt: e.target.value }))}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDraft((d) => ({ ...d, checkInAt: localNow() }))}
+            >
+              {t("guest.checkin.now")}
+            </Button>
+          </div>
+        ) : (
+          <Input
+            autoFocus
+            type={current.key === "partySize" ? "number" : current.key === "contactNumber" ? "tel" : "text"}
+            min={current.key === "partySize" ? 1 : undefined}
+            value={draft[current.key]}
+            onChange={(e) => setDraft((d) => ({ ...d, [current.key]: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || !current.valid) return;
+              e.preventDefault();
+              advance();
+            }}
+          />
+        )}
+
+        <div className="flex gap-2">
+          {step > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => setStep((value) => value - 1)}
+            >
+              {t("common.back")}
+            </Button>
+          )}
+          <Button
+            type="button"
+            className="flex-1"
+            disabled={!current.valid || save.isPending}
+            onClick={advance}
+          >
+            {isLast ? (save.isPending ? t("common.loading") : t("common.submit")) : t("guest.checkin.next")}
+          </Button>
+        </div>
+      </div>
+
+      <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("guest.checkin.closeTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("guest.checkin.closeBody")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={onDone}>{t("guest.checkin.closeConfirm")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  History — everything this stay has submitted                        */
+/* ------------------------------------------------------------------ */
+function HistoryView({ propertyId, sessionId }: { propertyId: string; sessionId: string }) {
+  const t = useT();
+  const historyQ = useQuery({
+    queryKey: ["guest-history", propertyId, sessionId],
+    queryFn: async () =>
+      getGuestActivity({ data: { propertyId, sessionId, sessionIds: readSessions(propertyId) } }),
+  });
+
+  const label: Record<string, string> = {
+    review: t("guest.condition"),
+    request: t("guest.request"),
+    order: t("guest.buy"),
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-semibold">{t("guest.history")}</h2>
+
+      {historyQ.isLoading ? (
+        <div className="h-24 animate-pulse rounded-md bg-muted" />
+      ) : (historyQ.data?.entries.length ?? 0) === 0 ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">{t("guest.historyEmpty")}</p>
+      ) : (
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {historyQ.data!.entries.map((entry) => (
+            <li key={entry.id} className="flex items-start gap-3 p-3">
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">
+                  {label[entry.kind]} · {entry.title}
+                </span>
+                {entry.detail && (
+                  <span className="block truncate text-sm text-muted-foreground">{entry.detail}</span>
+                )}
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {new Date(entry.at).toLocaleString()}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 function MenuView({
   propertyName,
   propertyAddress,
@@ -519,6 +878,9 @@ function MenuView({
   onCondition,
   onRequest,
   onShop,
+  onHistory,
+  onCheckout,
+  checkingOut,
 }: {
   propertyName: string;
   propertyAddress: string | null;
@@ -526,8 +888,12 @@ function MenuView({
   onCondition: () => void;
   onRequest: () => void;
   onShop: () => void;
+  onHistory: () => void;
+  onCheckout: () => void;
+  checkingOut: boolean;
 }) {
   const t = useT();
+  const [confirmCheckout, setConfirmCheckout] = useState(false);
 
   const cards = [
     {
@@ -638,7 +1004,11 @@ function ConditionView({
 }) {
   const t = useT();
   const [rating, setRating] = useState<number | null>(null);
+  // Notes and complaints go to different columns: only the complaint box (and
+  // a rating under the property's star threshold) reaches the complaints board.
+  const [mode, setMode] = useState<"notes" | "complaint">("notes");
   const [notes, setNotes] = useState("");
+  const [complaint, setComplaint] = useState("");
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [photos, setPhotos] = useState<PhotoDraft[]>([]);
 
@@ -650,6 +1020,7 @@ function ConditionView({
           sessionId,
           rating,
           notes: notes.trim() || undefined,
+          complaint: complaint.trim() || undefined,
           counts: Object.entries(counts)
             .filter(([, qty]) => qty > 0)
             .map(([amenityId, actualQty]) => ({ amenityId, actualQty })),
@@ -715,12 +1086,32 @@ function ConditionView({
         </div>
       )}
 
-      <Textarea
-        rows={3}
-        placeholder={t("common.notes")}
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-      />
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-1 rounded-lg border border-border p-1">
+          {(["notes", "complaint"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={mode === option}
+              onClick={() => setMode(option)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                mode === option
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {option === "notes" ? t("common.notes") : t("guest.complaint")}
+            </button>
+          ))}
+        </div>
+        <Textarea
+          rows={3}
+          placeholder={mode === "notes" ? t("guest.notesPlaceholder") : t("guest.complaintPlaceholder")}
+          value={mode === "notes" ? notes : complaint}
+          onChange={(e) => (mode === "notes" ? setNotes(e.target.value) : setComplaint(e.target.value))}
+        />
+      </div>
 
       <PhotoUpload
         value={photos[0] ?? null}

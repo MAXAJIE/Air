@@ -38,6 +38,7 @@ import {
   type ViewMode,
 } from "@/components/view-toggle";
 import { useActiveGroup } from "@/hooks/use-app";
+import { countForSection, useUnreadNotifications } from "@/hooks/use-notifications";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
 import { fileToBase64 } from "@/lib/files";
@@ -67,6 +68,8 @@ type Section = "shop" | "requests";
 function ShopPage() {
   const { section: sectionFromUrl } = Route.useSearch();
   const t = useT();
+  const { data: notifications } = useUnreadNotifications();
+  const pendingRequests = countForSection(notifications, "/shop", "requests");
   const navigate = useNavigate();
   const [section, setSection] = useState<Section>(
     sectionFromUrl === "requests" ? "requests" : "shop",
@@ -96,7 +99,14 @@ function ShopPage() {
             aria-label={t("shop.sectionToggle")}
           >
             <ToggleGroupItem value="shop">{t("shop.title")}</ToggleGroupItem>
-            <ToggleGroupItem value="requests">{t("req.title")}</ToggleGroupItem>
+            <ToggleGroupItem value="requests" className="gap-1.5">
+              {t("req.title")}
+              {pendingRequests > 0 && (
+                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground">
+                  {pendingRequests}
+                </span>
+              )}
+            </ToggleGroupItem>
           </ToggleGroup>
         }
       />

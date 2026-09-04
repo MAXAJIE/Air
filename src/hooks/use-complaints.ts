@@ -25,6 +25,8 @@ export type StayReview = {
   customer_session_id: string | null;
   overall_rating: number | null;
   notes: string | null;
+  /** Written in the guest's "complaint" box — distinct from neutral notes. */
+  complaint: string | null;
   submitted_at: string;
 };
 
@@ -80,7 +82,10 @@ export type Complaint = {
   sessionId: string | null;
   reportedAt: string;
   rating: number | null;
+  /** Neutral remarks; shown for context, never the reason a card exists. */
   notes: string | null;
+  /** The actual complaint text, when the guest wrote one. */
+  complaint: string | null;
   photos: PhotoRow[];
   shortages: CheckRow[];
   /** Amenities on the property checklist the guest left unanswered. */
@@ -88,6 +93,9 @@ export type Complaint = {
   /** Cleaner responsible: last clean completed before the guest reported. */
   cleanerUserId: string | null;
 };
+
+/** Star threshold below which a rating counts as a complaint. */
+export const DEFAULT_STAR_THRESHOLD = 4;
 
 export type ComplaintsData = {
   reviews: ReviewRow[];
@@ -97,7 +105,9 @@ export type ComplaintsData = {
   amenityDefs: AmenityDef[];
   roomCodes: Record<string, string>;
   jobs: JobRow[];
-  properties: { id: string; name: string }[];
+  properties: { id: string; name: string; complaint_star_threshold: number | null }[];
+  /** Group-wide fallback threshold. */
+  starThreshold: number;
   cleaners: PersonRow[];
   resolutions: ResolutionRow[];
 };
@@ -111,6 +121,7 @@ const EMPTY: ComplaintsData = {
   roomCodes: {},
   jobs: [],
   properties: [],
+  starThreshold: DEFAULT_STAR_THRESHOLD,
   cleaners: [],
   resolutions: [],
 };
@@ -129,12 +140,21 @@ export function useComplaintsData(groupId: string | null | undefined) {
     queryFn: async (): Promise<ComplaintsData> => {
       const { data: properties, error: propsError } = await supabase
         .from("properties")
-        .select("id, name")
+        .select("id, name, complaint_star_threshold")
         .eq("owner_group_id", groupId!);
       if (propsError) throw propsError;
 
+      const { data: settings } = await supabase
+        .from("group_settings")
+        .select("complaint_star_threshold")
+        .eq("owner_group_id", groupId!)
+        .maybeSingle();
+      const starThreshold = settings?.complaint_star_threshold ?? DEFAULT_STAR_THRESHOLD;
+
       const propertyIds = (properties ?? []).map((property) => property.id);
-      if (propertyIds.length === 0) return { ...EMPTY, properties: properties ?? [] };
+      if (propertyIds.length === 0) {
+        return { ...EMPTY, properties: properties ?? [], starThreshold };
+      }
 
       const { data: reviews, error: reviewsError } = await supabase
         .from("cleaner_ratings")
@@ -145,7 +165,7 @@ export function useComplaintsData(groupId: string | null | undefined) {
 
       const { data: stays } = await supabase
         .from("room_condition_submissions")
-        .select("id, property_id, customer_session_id, overall_rating, notes, submitted_at")
+        .select("id, property_id, customer_session_id, overall_rating, notes, complaint, submitted_at")
         .in("property_id", propertyIds)
         .order("submitted_at", { ascending: false });
 
@@ -229,6 +249,7 @@ export function useComplaintsData(groupId: string | null | undefined) {
         roomCodes: Object.fromEntries((sessions ?? []).map((row) => [row.id, row.room_code])),
         jobs: jobRows,
         properties: properties ?? [],
+        starThreshold,
         cleaners: (people ?? []) as PersonRow[],
         resolutions: resolutionRows,
       };
@@ -297,6 +318,10 @@ export function buildComplaints(data: ComplaintsData | undefined): Complaint[] {
       .map((def) => ({ id: def.id, name: def.name, expected: def.expected_qty }));
   };
 
+  const thresholdFor = (propertyId: string) =>
+    data.properties.find((property) => property.id === propertyId)?.complaint_star_threshold ??
+    data.starThreshold;
+
   const built: Complaint[] = [];
   const usedSessions = new Set<string>();
 
@@ -306,8 +331,14 @@ export function buildComplaints(data: ComplaintsData | undefined): Complaint[] {
       ? (shortagesBySession.get(stay.customer_session_id) ?? [])
       : [];
     if (stay.customer_session_id) usedSessions.add(stay.customer_session_id);
+    const complaintText = stay.complaint?.trim() ? stay.complaint : null;
     const hasNotes = !!stay.notes && stay.notes.trim().length > 0;
-    if (photos.length === 0 && shortages.length === 0 && !hasNotes) continue;
+    // A five-star stay with a friendly note is not a complaint. Only an
+    // explicit complaint, evidence photos, missing amenities, or a rating
+    // under the property's threshold earns a card.
+    const lowRating =
+      stay.overall_rating != null && stay.overall_rating < thresholdFor(stay.property_id);
+    if (!complaintText && photos.length === 0 && shortages.length === 0 && !lowRating) continue;
     built.push({
       key: stay.id,
       propertyId: stay.property_id,
@@ -315,6 +346,7 @@ export function buildComplaints(data: ComplaintsData | undefined): Complaint[] {
       reportedAt: stay.submitted_at,
       rating: stay.overall_rating,
       notes: hasNotes ? stay.notes : null,
+      complaint: complaintText,
       photos,
       shortages,
       unreported: unreportedFor(stay.property_id, stay.customer_session_id),
@@ -331,6 +363,7 @@ export function buildComplaints(data: ComplaintsData | undefined): Complaint[] {
       reportedAt: shortages[0].checked_at,
       rating: null,
       notes: null,
+      complaint: null,
       photos: [],
       shortages,
       unreported: unreportedFor(shortages[0].property_id, sessionId),
@@ -346,6 +379,7 @@ export function buildComplaints(data: ComplaintsData | undefined): Complaint[] {
       reportedAt: shortage.checked_at,
       rating: null,
       notes: null,
+      complaint: null,
       photos: [],
       shortages: [shortage],
       unreported: [],

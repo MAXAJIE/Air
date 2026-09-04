@@ -161,6 +161,141 @@ export const getGuestContext = createServerFn({ method: "POST" })
     };
   });
 
+/** Check-in details captured by the guest welcome checklist. */
+export const saveGuestCheckIn = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        propertyId: uuid,
+        sessionId: uuid,
+        guestName: z.string().min(1).max(120),
+        partySize: z.number().int().min(1).max(50),
+        checkInAt: z.string().min(1).max(40),
+        contactNumber: z.string().min(3).max(40),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    await requireSession(data.sessionId, data.propertyId);
+    const when = new Date(data.checkInAt);
+    if (Number.isNaN(when.getTime())) throw new Error("Invalid check-in time");
+
+    const db = await admin();
+    const { error } = await db
+      .from("customer_sessions")
+      .update({
+        guest_name: data.guestName,
+        party_size: data.partySize,
+        check_in_at: when.toISOString(),
+        contact_number: data.contactNumber,
+      })
+      .eq("id", data.sessionId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+/** Everything this stay has submitted so far, newest first. */
+export const getGuestActivity = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z
+      .object({ propertyId: uuid, sessionId: uuid, sessionIds: z.array(uuid).max(50).optional() })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    await requireSession(data.sessionId, data.propertyId);
+    const db = await admin();
+
+    // Past sessions of the same device are included so a checkout does not
+    // wipe the guest's history. Each id is re-checked against the property.
+    const requested = Array.from(new Set([data.sessionId, ...(data.sessionIds ?? [])]));
+    const { data: owned, error: ownedError } = await db
+      .from("customer_sessions")
+      .select("id")
+      .eq("property_id", data.propertyId)
+      .in("id", requested);
+    if (ownedError) throw new Error(ownedError.message);
+    const sessionIds = (owned ?? []).map((row) => row.id);
+
+    const [reviews, requests, orders] = await Promise.all([
+      db
+        .from("room_condition_submissions")
+        .select("id, overall_rating, notes, complaint, submitted_at")
+        .in("customer_session_id", sessionIds),
+      db
+        .from("special_requests")
+        .select("id, description, status, created_at")
+        .in("customer_session_id", sessionIds),
+      db
+        .from("shopping_orders")
+        .select("id, total_amount, status, created_at")
+        .in("customer_session_id", sessionIds),
+    ]);
+    for (const result of [reviews, requests, orders]) {
+      if (result.error) throw new Error(result.error.message);
+    }
+
+    const entries = [
+      ...(reviews.data ?? []).map((row) => ({
+        id: `review-${row.id}`,
+        kind: "review" as const,
+        title: row.overall_rating ? `${row.overall_rating}/5` : "—",
+        detail: row.complaint || row.notes || "",
+        at: row.submitted_at as string,
+      })),
+      ...(requests.data ?? []).map((row) => ({
+        id: `request-${row.id}`,
+        kind: "request" as const,
+        title: row.status as string,
+        detail: row.description as string,
+        at: row.created_at as string,
+      })),
+      ...(orders.data ?? []).map((row) => ({
+        id: `order-${row.id}`,
+        kind: "order" as const,
+        title: row.status as string,
+        detail: String(row.total_amount),
+        at: row.created_at as string,
+      })),
+    ];
+
+    return { entries: entries.sort((a, b) => b.at.localeCompare(a.at)) };
+  });
+
+/**
+ * Check out. The owner keeps the closed session as the record of the stay and
+ * the device gets a fresh session for anything it does next; the guest's own
+ * history still lists the closed sessions.
+ */
+export const checkoutGuestSession = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => z.object({ propertyId: uuid, sessionId: uuid }).parse(input))
+  .handler(async ({ data }) => {
+    await requireSession(data.sessionId, data.propertyId);
+    const db = await admin();
+
+    const { error } = await db
+      .from("customer_sessions")
+      .update({ checked_out_at: new Date().toISOString() })
+      .eq("id", data.sessionId);
+    if (error) throw new Error(error.message);
+
+    const { data: property, error: propError } = await db
+      .from("properties")
+      .select("access_code")
+      .eq("id", data.propertyId)
+      .maybeSingle();
+    if (propError) throw new Error(propError.message);
+    if (!property?.access_code) throw new Error("Property is no longer available");
+
+    const { data: session, error: newError } = await db
+      .from("customer_sessions")
+      .insert({ property_id: data.propertyId, room_code: property.access_code })
+      .select("id")
+      .single();
+    if (newError) throw new Error(newError.message);
+
+    return { sessionId: session.id };
+  });
+
 /** Room condition: amenity counts (no photo required) + rating + hygiene photos. */
 export const submitRoomCondition = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
@@ -170,6 +305,7 @@ export const submitRoomCondition = createServerFn({ method: "POST" })
         sessionId: uuid,
         rating: z.number().int().min(1).max(5).nullable(),
         notes: z.string().max(2000).optional(),
+        complaint: z.string().max(2000).optional(),
         counts: z.array(z.object({ amenityId: uuid, actualQty: z.number().int().min(0).max(9999) })).max(60),
         photos: z
           .array(
@@ -195,6 +331,7 @@ export const submitRoomCondition = createServerFn({ method: "POST" })
         customer_session_id: data.sessionId,
         overall_rating: data.rating,
         notes: data.notes ?? null,
+        complaint: data.complaint ?? null,
       })
       .select("id")
       .single();

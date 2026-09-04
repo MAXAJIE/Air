@@ -1,15 +1,31 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, Navigate, createFileRoute, useLocation } from "@tanstack/react-router";
-import { AlertTriangle, Archive, Building2, Star } from "lucide-react";
+import { AlertTriangle, Archive, Building2, Settings, Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { ListSkeleton, PageHeader, StatCard, StatsSkeleton } from "@/components/app-shell";
-import { ComplaintList, Stars } from "@/components/complaint-card";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ComplaintList, Stars } from "@/components/complaint-card";
 import { ViewToggle, useViewPrefs, type CardSize, type ViewMode } from "@/components/view-toggle";
 import { useActiveGroup, useProfile } from "@/hooks/use-app";
 import {
+  DEFAULT_STAR_THRESHOLD,
   makeNamers,
   useComplaintsData,
   useSplitComplaints,
@@ -175,7 +191,11 @@ function ReviewsPage() {
 
   return (
     <>
-      <PageHeader title={t("reviews.title")} description={t("reviews.subtitle")} />
+      <PageHeader
+        title={t("reviews.title")}
+        description={t("reviews.subtitle")}
+        action={<ThresholdSettings groupId={groupId} />}
+      />
 
       {/* Reviews / complaints switch. Reviews is the default surface; every
           complaint lives behind the complaints side of this toggle. */}
@@ -368,5 +388,113 @@ function ReviewsPage() {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * Star threshold that turns a rating into a complaint. The group value is the
+ * default; a property may override it for itself.
+ */
+function ThresholdSettings({ groupId }: { groupId: string | null | undefined }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const { data } = useComplaintsData(groupId);
+  const [open, setOpen] = useState(false);
+
+  const saveGroup = useMutation({
+    mutationFn: async (value: number) => {
+      const { error } = await supabase
+        .from("group_settings")
+        .upsert({ owner_group_id: groupId!, complaint_star_threshold: value });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["reviews"] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const saveProperty = useMutation({
+    mutationFn: async ({ id, value }: { id: string; value: number | null }) => {
+      const { error } = await supabase
+        .from("properties")
+        .update({ complaint_star_threshold: value })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["reviews"] }),
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  const options = [1, 2, 3, 4, 5];
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Settings className="mr-1.5 h-4 w-4" aria-hidden="true" />
+          {t("reviews.threshold")}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{t("reviews.threshold")}</DialogTitle>
+          <DialogDescription>{t("reviews.thresholdHelp")}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium">{t("reviews.thresholdGroup")}</span>
+            <Select
+              value={String(data?.starThreshold ?? DEFAULT_STAR_THRESHOLD)}
+              onValueChange={(value) => saveGroup.mutate(Number(value))}
+            >
+              <SelectTrigger className="h-8 w-28">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((value) => (
+                  <SelectItem key={value} value={String(value)}>
+                    {value} ★
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-sm font-medium">{t("reviews.thresholdPerProperty")}</p>
+            {(data?.properties ?? []).map((property) => (
+              <div key={property.id} className="flex items-center justify-between gap-3">
+                <span className="truncate text-sm text-muted-foreground">{property.name}</span>
+                <Select
+                  value={
+                    property.complaint_star_threshold == null
+                      ? "inherit"
+                      : String(property.complaint_star_threshold)
+                  }
+                  onValueChange={(value) =>
+                    saveProperty.mutate({
+                      id: property.id,
+                      value: value === "inherit" ? null : Number(value),
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-8 w-28">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t("reviews.thresholdInherit")}</SelectItem>
+                    {options.map((value) => (
+                      <SelectItem key={value} value={String(value)}>
+                        {value} ★
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

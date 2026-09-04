@@ -12,9 +12,16 @@ import {
   Sparkle,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { PageHeader, StatCard, StatsSkeleton, ListSkeleton } from "@/components/app-shell";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useActiveGroup, useAuthUser, useProfile } from "@/hooks/use-app";
 import { useT, type TranslationKey } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
@@ -300,9 +307,14 @@ function OwnerDashboard() {
       complaintCount: complaints.length,
       amenityCount: amenity.length,
       total: properties.length,
-      ready: properties.filter((p) => statusById.get(p.status_id ?? "") === "Ready").length,
+      readyList: properties.filter((p) => statusById.get(p.status_id ?? "") === "Ready"),
+      busyList: properties
+        .filter((p) => statusById.get(p.status_id ?? "") !== "Ready")
+        .map((p) => ({ ...p, statusLabel: statusById.get(p.status_id ?? "") ?? t("dash.unassigned") })),
     };
   }, [data, t]);
+
+  const [attentionOpen, setAttentionOpen] = useState(false);
 
   if (isLoading) {
     return (
@@ -326,9 +338,14 @@ function OwnerDashboard() {
       <section className="surface mt-6 p-5">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg">{t("dash.attention")}</h2>
-          <Link to="/cleaning" className="text-sm text-muted-foreground hover:underline">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => setAttentionOpen(true)}
+          >
             {t("dash.viewAll")}
-          </Link>
+          </Button>
         </div>
         <ul className="divide-y divide-border">
           {view.feed.slice(0, 8).map((row) => (
@@ -347,10 +364,65 @@ function OwnerDashboard() {
         </ul>
       </section>
 
-      <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-        <Building2 className="h-4 w-4" aria-hidden="true" />
-        {view.ready}/{view.total} {t("dash.properties")}
-      </p>
+      {/* Every attention item, not just the first eight. */}
+      <Dialog open={attentionOpen} onOpenChange={setAttentionOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("dash.attention")}</DialogTitle>
+          </DialogHeader>
+          <ul className="divide-y divide-border">
+            {view.feed.map((row) => (
+              <AttentionRow
+                key={row.key}
+                tone={row.tone}
+                title={row.title}
+                detail={row.detail}
+                when={row.when}
+                propertyId={row.propertyId}
+              />
+            ))}
+            {view.feed.length === 0 && (
+              <li className="py-8 text-center text-sm text-muted-foreground">{t("dash.allClear")}</li>
+            )}
+          </ul>
+        </DialogContent>
+      </Dialog>
+
+      {/* Availability: the count alone never said *which* room is ready. */}
+      <section className="surface mt-6 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 text-lg">
+            <Building2 className="h-4 w-4" aria-hidden="true" />
+            {t("dash.available")}
+          </h2>
+          <span className="text-sm text-muted-foreground">
+            {view.readyList.length}/{view.total} {t("dash.properties")}
+          </span>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {view.readyList.map((property) => (
+            <span
+              key={property.id}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-sm"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+              {property.name}
+            </span>
+          ))}
+          {view.busyList.map((property) => (
+            <span
+              key={property.id}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-sm text-muted-foreground"
+            >
+              {property.name} · {property.statusLabel}
+            </span>
+          ))}
+          {view.total === 0 && (
+            <p className="text-sm text-muted-foreground">{t("dash.allClear")}</p>
+          )}
+        </div>
+      </section>
     </>
   );
 }

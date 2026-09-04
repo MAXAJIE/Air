@@ -24,28 +24,45 @@ export type PlaceValue = {
 
 type Coords = { lat: number; lng: number };
 
-function requestPosition(options: PositionOptions): Promise<Coords | null> {
+/** A failed attempt keeps its error code so the message can be specific. */
+type Attempt = { coords: Coords | null; code: number | null };
+
+function requestPosition(options: PositionOptions): Promise<Attempt> {
   return new Promise((resolve) => {
     let settled = false;
-    const done = (value: Coords | null) => {
+    const done = (value: Attempt) => {
       if (settled) return;
       settled = true;
       resolve(value);
     };
     // Some embedded frames never call either callback, so cap the wait ourselves.
-    const timer = setTimeout(() => done(null), (options.timeout ?? 10000) + 2000);
+    const timer = setTimeout(() => done({ coords: null, code: null }), (options.timeout ?? 10000) + 2000);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         clearTimeout(timer);
-        done({ lat: position.coords.latitude, lng: position.coords.longitude });
+        done({ coords: { lat: position.coords.latitude, lng: position.coords.longitude }, code: null });
       },
-      () => {
+      (error) => {
         clearTimeout(timer);
-        done(null);
+        done({ coords: null, code: error.code });
       },
       options,
     );
   });
+}
+
+/**
+ * A cross-origin iframe (the editor preview, an embedded dashboard) only gets
+ * GPS when the parent frame grants it. Granting the browser permission does
+ * nothing there, which is exactly the "I allowed it and it still fails" case.
+ */
+function isEmbedded() {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -56,15 +73,47 @@ function requestPosition(options: PositionOptions): Promise<Coords | null> {
  * instantly. The retry uses `maximumAge: 0` so a freshly granted permission is
  * actually used instead of the stale denial.
  */
-async function getBrowserPosition(): Promise<Coords | null> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) return null;
+async function getBrowserPosition(): Promise<Attempt> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return { coords: null, code: null };
+  }
+  // A "denied" permission state is final: calling getCurrentPosition then only
+  // burns a timeout, so go straight to the coarse fallback.
+  if (await permissionDenied()) return { coords: null, code: 1 };
+
   const first = await requestPosition({
     enableHighAccuracy: true,
     timeout: 10000,
     maximumAge: 60000,
   });
-  if (first) return first;
+  if (first.coords) return first;
   return requestPosition({ enableHighAccuracy: false, timeout: 15000, maximumAge: 0 });
+}
+
+async function permissionDenied(): Promise<boolean> {
+  try {
+    const status = await navigator.permissions?.query({ name: "geolocation" as PermissionName });
+    return status?.state === "denied";
+  } catch {
+    return false;
+  }
+}
+
+/** Why GPS failed, phrased as something the user can actually act on. */
+function blockedMessage(code: number | null): string {
+  if (isEmbedded()) {
+    return "This page is embedded, so the browser will not share GPS here. Open it in its own tab, or type the address instead.";
+  }
+  if (code === 1) {
+    return "Location permission is blocked for this site. Allow it in the address-bar site settings, then try again.";
+  }
+  if (code === 2) {
+    return "Your device could not get a fix. Turn on device location services, or type the address instead.";
+  }
+  if (code === 3) {
+    return "Getting a location took too long. Try again outdoors, or type the address instead.";
+  }
+  return "Location is unavailable on this device. Type the address instead.";
 }
 
 /** Address entry that always resolves to real coordinates — typo-proof by design. */
@@ -93,18 +142,15 @@ export function AddressPicker({
   });
 
   const locate = useMutation({
-    mutationFn: async (): Promise<{ result: GeoResult; approximate: boolean }> => {
-      const position = await getBrowserPosition();
+    mutationFn: async (): Promise<{ result: GeoResult; approximate: boolean; reason?: string }> => {
+      const attempt = await getBrowserPosition();
+      const position = attempt.coords;
 
       // GPS blocked (denied, embedded frame, no hardware): fall back to a coarse IP fix.
       if (!position) {
         const fallback = await approximateLocation().catch(() => ({ result: null }));
-        if (!fallback.result) {
-          throw new Error(
-            "Location is turned off for this site. Allow location access in your browser, or type the address instead.",
-          );
-        }
-        return { result: fallback.result, approximate: true };
+        if (!fallback.result) throw new Error(blockedMessage(attempt.code));
+        return { result: fallback.result, approximate: true, reason: blockedMessage(attempt.code) };
       }
 
       // Coordinates are already good enough to save; a failing reverse lookup
@@ -121,9 +167,13 @@ export function AddressPicker({
       }).catch(() => ({ result: null }));
       return { result: response.result ?? coordsOnly, approximate: false };
     },
-    onSuccess: ({ result, approximate }) => {
+    onSuccess: ({ result, approximate, reason }) => {
       pick(result);
-      if (approximate) toast.info("Approximate location used — check the address before saving.");
+      if (approximate) {
+        toast.info(
+          `Approximate location used — check the address before saving.${reason ? ` (${reason})` : ""}`,
+        );
+      }
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not read your location"),
   });

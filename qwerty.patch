@@ -1,263 +1,400 @@
-diff --git a/src/components/address-picker.tsx b/src/components/address-picker.tsx
-index 4590515..0eb5cc1 100644
---- a/src/components/address-picker.tsx
-+++ b/src/components/address-picker.tsx
-@@ -77,7 +77,7 @@ export function AddressPicker({
- 
-       // GPS blocked (denied, embedded frame, no hardware): fall back to a coarse IP fix.
-       if (!position) {
--        const fallback = await approximateLocation();
-+        const fallback = await approximateLocation().catch(() => ({ result: null }));
-         if (!fallback.result) {
-           throw new Error(
-             "Location is turned off for this site. Allow location access in your browser, or type the address instead.",
-@@ -86,20 +86,19 @@ export function AddressPicker({
-         return { result: fallback.result, approximate: true };
-       }
- 
-+      // Coordinates are already good enough to save; a failing reverse lookup
-+      // must never throw away a successful GPS read.
-+      const coordsOnly: GeoResult = {
-+        id: "pin",
-+        label: "Pinned location",
-+        address: `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`,
-+        lat: position.lat,
-+        lng: position.lng,
-+      };
-       const response = await reverseGeocode({
-         data: { lat: position.lat, lng: position.lng },
--      });
--      return {
--        result:
--          response.result ?? {
--            id: "pin",
--            label: "Pinned location",
--            address: `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`,
--            lat: position.lat,
--            lng: position.lng,
--          },
--        approximate: false,
--      };
-+      }).catch(() => ({ result: null }));
-+      return { result: response.result ?? coordsOnly, approximate: false };
-     },
-     onSuccess: ({ result, approximate }) => {
-       pick(result);
-diff --git a/src/i18n/translations.ts b/src/i18n/translations.ts
-index 61c0893..48a12a8 100644
---- a/src/i18n/translations.ts
-+++ b/src/i18n/translations.ts
-@@ -603,6 +603,7 @@ const en = {
-   "prop.coverAdd": "Add a cover photo",
-   "prop.location": "Location",
-   "prop.edit": "Edit property",
-+  "prop.settings": "Status colours & details",
- 
-   "people.owners": "Owners",
-   "people.cleaners": "Cleaners",
-diff --git a/src/routes/_authenticated/properties.index.tsx b/src/routes/_authenticated/properties.index.tsx
-index 03c13c9..40a3412 100644
---- a/src/routes/_authenticated/properties.index.tsx
-+++ b/src/routes/_authenticated/properties.index.tsx
-@@ -1,5 +1,5 @@
- import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
--import { createFileRoute, Link } from "@tanstack/react-router";
-+import { createFileRoute, useNavigate } from "@tanstack/react-router";
- import { ExternalLink, Filter, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
- import { useMemo, useState } from "react";
- import { toast } from "sonner";
-@@ -66,6 +66,7 @@ type EditState = {
- function PropertiesPage() {
-   const t = useT();
-   const qc = useQueryClient();
-+  const navigate = useNavigate();
-   const { groupId } = useActiveGroup();
-   const prefs = useViewPrefs("properties");
-   const initial = prefs.read();
-@@ -226,9 +227,9 @@ function PropertiesPage() {
-       <Button
-         variant="ghost"
-         size="icon"
--        aria-label={t("prop.edit")}
--        title={t("prop.edit")}
--        onClick={() => startEdit(p)}
-+        aria-label={t("prop.settings")}
-+        title={t("prop.settings")}
-+        onClick={() => navigate({ to: "/properties/$propertyId", params: { propertyId: p.id } })}
-       >
-         <Pencil className="h-4 w-4" aria-hidden="true" />
-       </Button>
-@@ -314,10 +315,10 @@ function PropertiesPage() {
-         <ul className="surface divide-y divide-border">
-           {filtered.map((p, index) => (
-             <li key={p.id} className="flex items-center gap-1 pr-2 animate-card-enter transition-colors hover:bg-accent/40" style={{ animationDelay: `${index * 30}ms` }}>
--              <Link
--                to="/properties/$propertyId"
--                params={{ propertyId: p.id }}
--                className="flex min-w-0 flex-1 items-center gap-3 p-3"
-+              <button
-+                type="button"
-+                onClick={() => startEdit(p)}
-+                className="flex min-w-0 flex-1 items-center gap-3 p-3 text-left"
-               >
-                 {p.photo_path ? (
-                   <SignedPhoto path={p.photo_path} alt={p.name} className="h-12 w-16 shrink-0 object-cover" />
-@@ -339,7 +340,7 @@ function PropertiesPage() {
-                 <span className="hidden shrink-0 font-mono text-xs text-muted-foreground md:inline">
-                   {p.access_code}
-                 </span>
--              </Link>
-+              </button>
-               <RowActions p={p} />
-             </li>
-           ))}
-@@ -352,7 +353,11 @@ function PropertiesPage() {
-               className="surface overflow-hidden animate-card-enter transition-all hover:shadow-[var(--shadow-lift)] hover:-translate-y-0.5"
-               style={{ animationDelay: `${index * 40}ms` }}
-             >
--              <Link to="/properties/$propertyId" params={{ propertyId: p.id }} className="relative block">
-+              <button
-+                type="button"
-+                onClick={() => startEdit(p)}
-+                className="relative block w-full text-left"
-+              >
-                 <span
-                   className={`absolute left-2 top-2 z-10 ${statusChipClass(statusColor(p.status_id))}`}
-                   style={statusChipStyle(statusColor(p.status_id))}
-@@ -379,7 +384,7 @@ function PropertiesPage() {
-                     </div>
-                   )}
-                 </div>
--              </Link>
-+              </button>
-               <div className="flex items-center justify-end border-t border-border px-2 py-1">
-                 <RowActions p={p} />
-               </div>
-diff --git a/src/routes/g.$code.tsx b/src/routes/g.$code.tsx
-index ac4108c..c0eb9dd 100644
---- a/src/routes/g.$code.tsx
-+++ b/src/routes/g.$code.tsx
-@@ -279,7 +279,8 @@ function GuestByCodePage() {
-         setView("expired");
-       } else {
-         setView("error");
--        setErrorMessage(t("common.error"));
-+        // Show what actually failed instead of a dead end the guest cannot act on.
-+        setErrorMessage(msg || t("common.error"));
-       }
-       return;
-     }
-@@ -294,7 +295,7 @@ function GuestByCodePage() {
-         setView("expired");
-       } else {
-         setView("error");
--        setErrorMessage(t("common.error"));
-+        setErrorMessage(msg || t("common.error"));
-       }
-       return;
-     }
-@@ -356,6 +357,7 @@ function GuestByCodePage() {
-               setErrorMessage("");
-               setView("loading");
-               void propertyQ.refetch();
-+              void sessionQ.refetch();
-               void contextQ.refetch();
-             }}
-           >
-diff --git a/src/start.ts b/src/start.ts
-index a87e006..fb2f600 100644
---- a/src/start.ts
-+++ b/src/start.ts
-@@ -1,7 +1,9 @@
--import { createStart, createCsrfMiddleware, createMiddleware } from "@tanstack/react-start";
-+import { createStart, createMiddleware } from "@tanstack/react-start";
-+import { getRequest } from "@tanstack/react-start/server";
- 
- import { renderErrorPage } from "./lib/error-page";
- import { attachSupabaseAuth } from "@/integrations/supabase/auth-attacher";
-+import { isTrustedRequestOrigin } from "./lib/csrf";
- 
- const errorMiddleware = createMiddleware().server(async ({ next }) => {
-   try {
-@@ -18,11 +20,18 @@ const errorMiddleware = createMiddleware().server(async ({ next }) => {
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.orig' '--exclude=*.rej' prev/src/components/address-picker.tsx cur/src/components/address-picker.tsx
+--- a/src/components/address-picker.tsx	2026-09-04 08:49:14.602277377 +0000
++++ b/src/components/address-picker.tsx	2026-09-04 08:47:28.784013687 +0000
+@@ -77,6 +77,10 @@
+   if (typeof navigator === "undefined" || !navigator.geolocation) {
+     return { coords: null, code: null };
    }
- });
++  // A "denied" permission state is final: calling getCurrentPosition then only
++  // burns a timeout, so go straight to the coarse fallback.
++  if (await permissionDenied()) return { coords: null, code: 1 };
++
+   const first = await requestPosition({
+     enableHighAccuracy: true,
+     timeout: 10000,
+@@ -86,6 +90,15 @@
+   return requestPosition({ enableHighAccuracy: false, timeout: 15000, maximumAge: 0 });
+ }
  
--// Start installs this automatically when src/start.ts is absent; defining the
--// file opts out, so re-add it explicitly to keep server functions protected
--// from cross-site requests.
--const csrfMiddleware = createCsrfMiddleware({
--  filter: (ctx) => ctx.handlerType === "serverFn",
-+// Start installs a CSRF guard automatically when src/start.ts is absent, and
-+// defining this file opts out — so keep an explicit guard. The built-in one
-+// compares Origin to the raw Host header, which never matches behind Lovable's
-+// proxy and made every POST server function fail; isTrustedRequestOrigin also
-+// accepts the forwarded host and known Lovable hosts.
-+const csrfMiddleware = createMiddleware().server(async ({ next }) => {
-+  const request = getRequest();
-+  const method = request.method.toUpperCase();
-+  if (method !== "GET" && method !== "HEAD" && !isTrustedRequestOrigin(request)) {
-+    return new Response("Cross-site request blocked", { status: 403 });
-+  }
-+  return next();
- });
- 
- export const startInstance = createStart(() => ({
-diff --git a/src/lib/csrf.ts b/src/lib/csrf.ts
-new file mode 100644
-new file mode 100644
-index 0000000..d2d72dc
---- /dev/null
-+++ b/src/lib/csrf.ts
-@@ -0,0 +1,51 @@
-+/**
-+ * Proxy-aware CSRF check for server functions.
-+ *
-+ * TanStack's built-in `createCsrfMiddleware` compares the request `Origin`
-+ * against the `Host` header. Lovable preview/published traffic is proxied, so
-+ * the inbound `Host` is the internal origin while the browser sends the public
-+ * hostname — every POST server function then fails with a 500 HTML page
-+ * ("Something went wrong" on the guest page, broken photo signing, failing
-+ * location lookups). This variant accepts a request when the browser origin
-+ * matches any host the proxy chain reports, or a known Lovable/localhost host.
-+ */
-+const ALLOWED_HOST_SUFFIXES = [
-+  ".lovable.app",
-+  ".lovableproject.com",
-+  ".lovable.dev",
-+  ".sandbox.lovable.dev",
-+];
-+
-+function isLocalHost(hostname: string) {
-+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
-+}
-+
-+export function isTrustedRequestOrigin(request: Request): boolean {
-+  const origin = request.headers.get("origin");
-+  // Same-origin navigations and server-to-server calls omit Origin.
-+  if (!origin || origin === "null") return true;
-+
-+  let hostname: string;
++async function permissionDenied(): Promise<boolean> {
 +  try {
-+    hostname = new URL(origin).hostname;
++    const status = await navigator.permissions?.query({ name: "geolocation" as PermissionName });
++    return status?.state === "denied";
 +  } catch {
 +    return false;
 +  }
-+
-+  if (isLocalHost(hostname)) return true;
-+  if (ALLOWED_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix))) return true;
-+
-+  const candidates = [
-+    request.headers.get("x-forwarded-host"),
-+    request.headers.get("host"),
-+    (() => {
-+      try {
-+        return new URL(request.url).host;
-+      } catch {
-+        return null;
-+      }
-+    })(),
-+  ].filter((value): value is string => !!value);
-+
-+  return candidates.some((candidate) => candidate.split(":")[0] === hostname);
 +}
++
+ /** Why GPS failed, phrased as something the user can actually act on. */
+ function blockedMessage(code: number | null): string {
+   if (isEmbedded()) {
+@@ -129,7 +142,7 @@
+   });
+ 
+   const locate = useMutation({
+-    mutationFn: async (): Promise<{ result: GeoResult; approximate: boolean }> => {
++    mutationFn: async (): Promise<{ result: GeoResult; approximate: boolean; reason?: string }> => {
+       const attempt = await getBrowserPosition();
+       const position = attempt.coords;
+ 
+@@ -137,7 +150,7 @@
+       if (!position) {
+         const fallback = await approximateLocation().catch(() => ({ result: null }));
+         if (!fallback.result) throw new Error(blockedMessage(attempt.code));
+-        return { result: fallback.result, approximate: true };
++        return { result: fallback.result, approximate: true, reason: blockedMessage(attempt.code) };
+       }
+ 
+       // Coordinates are already good enough to save; a failing reverse lookup
+@@ -154,9 +167,13 @@
+       }).catch(() => ({ result: null }));
+       return { result: response.result ?? coordsOnly, approximate: false };
+     },
+-    onSuccess: ({ result, approximate }) => {
++    onSuccess: ({ result, approximate, reason }) => {
+       pick(result);
+-      if (approximate) toast.info("Approximate location used — check the address before saving.");
++      if (approximate) {
++        toast.info(
++          `Approximate location used — check the address before saving.${reason ? ` (${reason})` : ""}`,
++        );
++      }
+     },
+     onError: (e) => toast.error(e instanceof Error ? e.message : "Could not read your location"),
+   });
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.orig' '--exclude=*.rej' prev/src/lib/geo.functions.ts cur/src/lib/geo.functions.ts
+--- a/src/lib/geo.functions.ts	2026-09-03 10:16:46.433000000 +0000
++++ b/src/lib/geo.functions.ts	2026-09-04 08:47:28.776935673 +0000
+@@ -81,8 +81,7 @@
+  */
+ export const approximateLocation = createServerFn({ method: "POST" })
+   .middleware([requireSupabaseAuth])
+-  .handler(
+-  async (): Promise<{ result: GeoResult | null }> => {
++  .handler(async (): Promise<{ result: GeoResult | null }> => {
+     const request = getRequest();
+     const clientIp =
+       request.headers.get("cf-connecting-ip") ??
+@@ -90,33 +89,63 @@
+       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+       null;
+ 
+-    const url = clientIp ? `https://ipapi.co/${clientIp}/json/` : "https://ipapi.co/json/";
+-    try {
+-      const response = await fetch(url, { headers: { "User-Agent": "keyward-app/1.0 (ip locate)" } });
+-      if (!response.ok) return { result: null };
+-      const json = (await response.json()) as {
+-        latitude?: number;
+-        longitude?: number;
+-        city?: string;
+-        region?: string;
+-        country_name?: string;
+-        error?: boolean;
+-      };
+-      if (json.error || typeof json.latitude !== "number" || typeof json.longitude !== "number") {
+-        return { result: null };
+-      }
+-      const parts = [json.city, json.region, json.country_name].filter(Boolean) as string[];
+-      return {
+-        result: {
+-          id: "ip",
+-          label: json.city || "Approximate location",
+-          address: parts.join(", "),
+-          lat: json.latitude,
+-          lng: json.longitude,
+-        },
+-      };
+-    } catch (error) {
+-      console.error("IP location lookup failed", error);
+-      return { result: null };
++    // Cloudflare already geolocates the request, so use that before any
++    // third-party lookup — it never rate-limits and never blocks us.
++    const fromEdge = edgeLocation(request.headers);
++    if (fromEdge) return { result: fromEdge };
++
++    // Free IP providers rate-limit and go down; try them in turn.
++    const endpoints = clientIp
++      ? [`https://ipapi.co/${clientIp}/json/`, `https://ipwho.is/${clientIp}`, `https://get.geojs.io/v1/ip/geo/${clientIp}.json`]
++      : ["https://ipapi.co/json/", "https://ipwho.is/", "https://get.geojs.io/v1/ip/geo.json"];
++
++    for (const url of endpoints) {
++      const result = await lookupIp(url);
++      if (result) return { result };
+     }
++    return { result: null };
+   });
++
++/** Cloudflare puts an approximate fix on every request it forwards. */
++function edgeLocation(headers: Headers): GeoResult | null {
++  const lat = Number(headers.get("cf-iplatitude"));
++  const lng = Number(headers.get("cf-iplongitude"));
++  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return null;
++  const parts = [headers.get("cf-ipcity"), headers.get("cf-region"), headers.get("cf-ipcountry")].filter(
++    Boolean,
++  ) as string[];
++  return {
++    id: "edge",
++    label: headers.get("cf-ipcity") || "Approximate location",
++    address: parts.join(", "),
++    lat,
++    lng,
++  };
++}
++
++/** Normalises the three provider shapes into one GeoResult. */
++async function lookupIp(url: string): Promise<GeoResult | null> {
++  try {
++    const response = await fetch(url, { headers: { "User-Agent": "keyward-app/1.0 (ip locate)" } });
++    if (!response.ok) return null;
++    const json = (await response.json()) as Record<string, unknown>;
++    if (json.error || json.success === false) return null;
++    const lat = Number(json.latitude ?? json.lat);
++    const lng = Number(json.longitude ?? json.lon ?? json.lng);
++    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
++    const city = (json.city as string) || "";
++    const region = (json.region as string) || "";
++    const country = (json.country_name as string) || (json.country as string) || "";
++    const parts = [city, region, country].filter(Boolean);
++    return {
++      id: "ip",
++      label: city || "Approximate location",
++      address: parts.join(", "),
++      lat,
++      lng,
++    };
++  } catch (error) {
++    console.error(`IP location lookup failed for ${url}`, error);
++    return null;
++  }
++}
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.orig' '--exclude=*.rej' prev/src/lib/guest.functions.ts cur/src/lib/guest.functions.ts
+--- a/src/lib/guest.functions.ts	2026-09-04 08:49:14.609834513 +0000
++++ b/src/lib/guest.functions.ts	2026-09-04 08:46:57.281386426 +0000
+@@ -196,24 +196,39 @@
+ 
+ /** Everything this stay has submitted so far, newest first. */
+ export const getGuestActivity = createServerFn({ method: "POST" })
+-  .inputValidator((input: unknown) => z.object({ propertyId: uuid, sessionId: uuid }).parse(input))
++  .inputValidator((input: unknown) =>
++    z
++      .object({ propertyId: uuid, sessionId: uuid, sessionIds: z.array(uuid).max(50).optional() })
++      .parse(input),
++  )
+   .handler(async ({ data }) => {
+     await requireSession(data.sessionId, data.propertyId);
+     const db = await admin();
+ 
++    // Past sessions of the same device are included so a checkout does not
++    // wipe the guest's history. Each id is re-checked against the property.
++    const requested = Array.from(new Set([data.sessionId, ...(data.sessionIds ?? [])]));
++    const { data: owned, error: ownedError } = await db
++      .from("customer_sessions")
++      .select("id")
++      .eq("property_id", data.propertyId)
++      .in("id", requested);
++    if (ownedError) throw new Error(ownedError.message);
++    const sessionIds = (owned ?? []).map((row) => row.id);
++
+     const [reviews, requests, orders] = await Promise.all([
+       db
+         .from("room_condition_submissions")
+         .select("id, overall_rating, notes, complaint, submitted_at")
+-        .eq("customer_session_id", data.sessionId),
++        .in("customer_session_id", sessionIds),
+       db
+         .from("special_requests")
+         .select("id, description, status, created_at")
+-        .eq("customer_session_id", data.sessionId),
++        .in("customer_session_id", sessionIds),
+       db
+         .from("shopping_orders")
+         .select("id, total_amount, status, created_at")
+-        .eq("customer_session_id", data.sessionId),
++        .in("customer_session_id", sessionIds),
+     ]);
+     for (const result of [reviews, requests, orders]) {
+       if (result.error) throw new Error(result.error.message);
+@@ -247,9 +262,9 @@
+   });
+ 
+ /**
+- * Check out. The owner keeps the closed session (and everything attached to
+- * it) as the record of the stay; the guest device gets a brand-new empty
+- * session, so their own history reads as cleared.
++ * Check out. The owner keeps the closed session as the record of the stay and
++ * the device gets a fresh session for anything it does next; the guest's own
++ * history still lists the closed sessions.
+  */
+ export const checkoutGuestSession = createServerFn({ method: "POST" })
+   .inputValidator((input: unknown) => z.object({ propertyId: uuid, sessionId: uuid }).parse(input))
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.orig' '--exclude=*.rej' prev/src/routes/g.$code.tsx cur/src/routes/g.$code.tsx
+--- a/src/routes/g.$code.tsx	2026-09-04 08:49:14.614729128 +0000
++++ b/src/routes/g.$code.tsx	2026-09-04 08:46:57.273201635 +0000
+@@ -66,6 +66,31 @@
+   return window.localStorage.getItem(checkInKey(sessionId)) === "1";
+ }
+ 
++/**
++ * Checking out closes the stay but must not erase what the guest did: the
++ * device remembers its past session ids so history survives a checkout.
++ */
++function sessionsKey(propertyId: string) {
++  return `guest-sessions:${propertyId}`;
++}
++
++function readSessions(propertyId: string): string[] {
++  if (typeof window === "undefined") return [];
++  try {
++    const raw = window.localStorage.getItem(sessionsKey(propertyId));
++    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
++    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
++  } catch {
++    return [];
++  }
++}
++
++function rememberSession(propertyId: string, sessionId: string) {
++  if (typeof window === "undefined") return;
++  const next = [sessionId, ...readSessions(propertyId).filter((id) => id !== sessionId)].slice(0, 30);
++  window.localStorage.setItem(sessionsKey(propertyId), JSON.stringify(next));
++}
++
+ export const Route = createFileRoute("/g/$code")({
+   ssr: false,
+   validateSearch: (search: Record<string, unknown>): { session?: string } => ({
+@@ -332,6 +357,7 @@
+     }
+ 
+     if (effectiveSessionId && contextQ.data) {
++      if (propertyQ.data) rememberSession(propertyQ.data.id, effectiveSessionId);
+       setSession({ sessionId: effectiveSessionId, propertyName: contextQ.data.propertyName });
+       setContext(contextQ.data);
+       setView(hasCheckedIn(effectiveSessionId) ? "menu" : "welcome");
+@@ -353,6 +379,33 @@
+ 
+   const property = propertyQ.data;
+ 
++  // A checkout closes the stay for the owner and hands this device a fresh
++  // session. Past sessions stay in the device's history list.
++  const checkout = useMutation({
++    mutationFn: async () => {
++      if (!session || !property) throw new Error("No active stay");
++      return checkoutGuestSession({
++        data: { propertyId: property.id, sessionId: session.sessionId },
++      });
++    },
++    onSuccess: (result) => {
++      if (typeof window !== "undefined" && property) {
++        window.localStorage.removeItem(checkInKey(session!.sessionId));
++        rememberSession(property.id, result.sessionId);
++      }
++      toast.success(t("guest.checkoutDone"));
++      navigate({
++        to: "/g/$code",
++        params: { code },
++        search: { session: result.sessionId },
++        replace: true,
++      });
++      if (typeof window !== "undefined") window.location.reload();
++    },
++    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
++  });
++
++
+   // ---- The page is loading ----
+   if (view === "loading") {
+     return (
+@@ -430,31 +483,6 @@
+     );
+   }
+ 
+-  // A checkout closes the stay for the owner and hands this device a fresh,
+-  // empty session — which is what clears the guest's own history.
+-  const checkout = useMutation({
+-    mutationFn: async () => {
+-      if (!session || !property) throw new Error("No active stay");
+-      return checkoutGuestSession({
+-        data: { propertyId: property.id, sessionId: session.sessionId },
+-      });
+-    },
+-    onSuccess: (result) => {
+-      if (typeof window !== "undefined") {
+-        window.localStorage.removeItem(checkInKey(session!.sessionId));
+-      }
+-      toast.success(t("guest.checkoutDone"));
+-      navigate({
+-        to: "/g/$code",
+-        params: { code },
+-        search: { session: result.sessionId },
+-        replace: true,
+-      });
+-      if (typeof window !== "undefined") window.location.reload();
+-    },
+-    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+-  });
+-
+   // ---- Thanks (different messages per action) ----
+   if (view === "thanksCondition") {
+     return (
+@@ -800,8 +828,9 @@
+ function HistoryView({ propertyId, sessionId }: { propertyId: string; sessionId: string }) {
+   const t = useT();
+   const historyQ = useQuery({
+-    queryKey: ["guest-history", sessionId],
+-    queryFn: async () => getGuestActivity({ data: { propertyId, sessionId } }),
++    queryKey: ["guest-history", propertyId, sessionId],
++    queryFn: async () =>
++      getGuestActivity({ data: { propertyId, sessionId, sessionIds: readSessions(propertyId) } }),
+   });
+ 
+   const label: Record<string, string> = {
+diff -ruN '--exclude=node_modules' '--exclude=.git' '--exclude=*.orig' '--exclude=*.rej' prev/supabase/migrations/20260904000000_guest_fixes.sql cur/supabase/migrations/20260904000000_guest_fixes.sql
+--- a/supabase/migrations/20260904000000_guest_fixes.sql	1970-01-01 00:00:00.000000000 +0000
++++ b/supabase/migrations/20260904000000_guest_fixes.sql	2026-09-04 08:46:13.904624788 +0000
+@@ -0,0 +1,46 @@
++-- Follow-up fixes.
++--
++-- 1. Hygiene photos win over the plain review notification: a 5-star review
++--    with hygiene pictures must read as a complaint, not as "review received".
++
++create or replace function public.notify_hygiene_photo()
++returns trigger
++language plpgsql
++security definer
++set search_path = public
++as $$
++declare
++  v_property uuid;
++  v_owner uuid;
++  v_existing int;
++begin
++  select count(*) into v_existing
++    from public.room_condition_photos
++   where submission_id = NEW.submission_id
++     and id <> NEW.id;
++  if v_existing > 0 then
++    return NEW;
++  end if;
++
++  v_property := public.submission_property(NEW.submission_id);
++  v_owner := public.group_owner_id(public.property_group(v_property));
++  if v_owner is null then
++    return NEW;
++  end if;
++
++  -- The submission row was inserted first and already raised its own alert.
++  -- Photos make it a complaint, so drop the softer unread alert for that row.
++  delete from public.notifications
++   where user_id = v_owner
++     and read = false
++     and type in ('review_received', 'low_rating')
++     and payload->>'submissionId' = NEW.submission_id::text;
++
++  perform public.notify_user(
++    v_owner,
++    'hygiene_complaint',
++    jsonb_build_object('propertyId', v_property, 'submissionId', NEW.submission_id)
++  );
++  return NEW;
++end;
++$$;
