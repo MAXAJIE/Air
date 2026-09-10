@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { CheckCircle2, ListChecks, Plus, Trash2 } from "lucide-react";
+import { CheckCircle2, Eye, ListChecks, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -205,10 +205,13 @@ function TasksPage() {
                     : t("task.pending")}
             </span>
 
+            {/* Owners review the submitted work (checklist + photos) before
+                approving, so the row action opens the detail dialog where the
+                approve button lives. */}
             {isOwner && task.status === "submitted" && (
-              <Button size="sm" onClick={() => setStatus.mutate({ id: task.id, status: "done" })}>
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                {t("task.approve")}
+              <Button size="sm" onClick={() => setOpenId(task.id)}>
+                <Eye className="h-4 w-4" aria-hidden="true" />
+                {t("task.view")}
               </Button>
             )}
             {isOwner && task.status === "done" && task.source !== "cleaning" && (

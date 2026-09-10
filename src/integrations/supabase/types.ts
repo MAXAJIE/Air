@@ -69,6 +69,7 @@ export type Database = {
           expected_qty_snapshot: number
           id: string
           is_discrepancy: boolean
+          notes: string | null
           photo_url: string | null
           property_id: string
           role: Database["public"]["Enums"]["check_role"]
@@ -83,6 +84,7 @@ export type Database = {
           expected_qty_snapshot?: number
           id?: string
           is_discrepancy?: boolean
+          notes?: string | null
           photo_url?: string | null
           property_id: string
           role: Database["public"]["Enums"]["check_role"]
@@ -97,6 +99,7 @@ export type Database = {
           expected_qty_snapshot?: number
           id?: string
           is_discrepancy?: boolean
+          notes?: string | null
           photo_url?: string | null
           property_id?: string
           role?: Database["public"]["Enums"]["check_role"]

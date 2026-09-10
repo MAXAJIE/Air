@@ -63,9 +63,11 @@ export const NOTIF_TO_ROUTE: Record<NotificationType, string> = {
   hr_request: "/inbox",
   hr_job_submitted: "/inbox",
   hr_job_reviewed: "/inbox",
-  task_assigned: "/tasks",
+  // A cleaner's assigned work lives on "My jobs"; the generic task list is
+  // the owner-side surface, so an assignment must not land there.
+  task_assigned: "/jobs",
   task_submitted: "/tasks",
-  task_approved: "/tasks",
+  task_approved: "/jobs",
   review_received: "/reviews",
   hygiene_complaint: "/reviews",
   low_rating: "/reviews",
@@ -99,6 +101,9 @@ export function countForSection(
  * Derive a notification's navigation URL from its type and payload.
  */
 export function notifUrl(notif: AppNotification): string {
+  // Work handed to the person doing it always opens "My jobs", even when an
+  // older stored link points at the owner-side task list.
+  if (notif.type === "task_assigned" || notif.type === "task_approved") return "/jobs";
   if (notif.target_url) return notif.target_url;
   if (notif.payload.url) return notif.payload.url;
   const route = NOTIF_TO_ROUTE[notif.type] ?? "/dashboard";

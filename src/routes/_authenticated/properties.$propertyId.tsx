@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Trash2, Copy, ExternalLink, Plus, Settings2 } from "lucide-react";
+import { ArrowLeft, Trash2, Copy, ExternalLink, ListChecks, Plus, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -457,14 +457,226 @@ function PropertyDetailView() {
           </div>
         </section>
 
-        <section className="surface space-y-2 p-5 lg:col-span-2">
-          <h2 className="text-lg">{t("prop.amenities")}</h2>
-          <p className="text-sm text-muted-foreground">{t("prop.amenitiesMoved")}</p>
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/cleaning">{t("prop.amenitiesMovedCta")}</Link>
-          </Button>
-        </section>
+        <AmenityTemplatesCard propertyId={propertyId} groupId={groupId ?? null} />
       </div>
     </>
+  );
+}
+
+
+/**
+ * Amenity templates for one property.
+ *
+ * The old button jumped to the shopping/cleaning page, which lost the context
+ * of the property being edited. Instead everything happens in place:
+ *  - a dialog lists the group's templates by name and marks the one currently
+ *    applied to this property;
+ *  - clicking a template opens a second dialog with its full item list;
+ *  - applying copies the template items onto the property (server-side RPC).
+ */
+function AmenityTemplatesCard({
+  propertyId,
+  groupId,
+}: {
+  propertyId: string;
+  groupId: string | null;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
+  const templatesQ = useQuery({
+    queryKey: ["amenity-templates", groupId],
+    enabled: !!groupId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("amenity_templates")
+        .select("id, name")
+        .eq("owner_group_id", groupId!)
+        .order("name");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  // The property's current amenity list. Its rows carry the template they were
+  // copied from, which is how we know which template is "current".
+  const definitionsQ = useQuery({
+    queryKey: ["amenity-definitions", propertyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("amenity_definitions")
+        .select("id, name, expected_qty, template_id")
+        .eq("property_id", propertyId)
+        .order("name");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  const definitions = definitionsQ.data ?? [];
+  const currentTemplateId = definitions.find((d) => d.template_id)?.template_id ?? null;
+  const currentTemplateName =
+    (templatesQ.data ?? []).find((tpl) => tpl.id === currentTemplateId)?.name ?? null;
+
+  const apply = useMutation({
+    mutationFn: async (templateId: string) => {
+      const { error } = await supabase.rpc("apply_amenity_template", {
+        p_property: propertyId,
+        p_template: templateId,
+        p_replace: true,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["amenity-definitions", propertyId] });
+      setDetailId(null);
+      setPickerOpen(false);
+      toast.success(t("common.saved"));
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  return (
+    <section className="surface space-y-3 p-5 lg:col-span-2">
+      <h2 className="text-lg">{t("prop.amenities")}</h2>
+      <p className="text-sm text-muted-foreground">
+        {t("prop.amenitiesCurrent")}{" "}
+        <span className="font-medium text-foreground">
+          {currentTemplateName ?? t("common.unassigned")}
+        </span>
+        {definitions.length > 0 && (
+          <> · {t("task.stepCount").replace("{n}", String(definitions.length))}</>
+        )}
+      </p>
+
+      <Button variant="outline" size="sm" onClick={() => setPickerOpen(true)}>
+        <ListChecks className="h-4 w-4" aria-hidden="true" />
+        {t("prop.amenitiesChoose")}
+      </Button>
+
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("prop.amenitiesChoose")}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {t("prop.amenitiesCurrent")}{" "}
+            <span className="font-medium text-foreground">
+              {currentTemplateName ?? t("common.unassigned")}
+            </span>
+          </p>
+          <div className="grid gap-2">
+            {(templatesQ.data ?? []).length === 0 && (
+              <p className="text-sm text-muted-foreground">{t("prop.amenitiesNoTemplates")}</p>
+            )}
+            {(templatesQ.data ?? []).map((tpl) => (
+              <button
+                key={tpl.id}
+                type="button"
+                onClick={() => setDetailId(tpl.id)}
+                className={
+                  "flex items-center gap-2 rounded-lg border p-3 text-left text-sm transition-colors hover:bg-accent " +
+                  (tpl.id === currentTemplateId ? "border-primary" : "border-border")
+                }
+              >
+                <span className="min-w-0 flex-1 truncate font-medium">{tpl.name}</span>
+                {tpl.id === currentTemplateId && (
+                  <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                    {t("prop.amenitiesInUse")}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {detailId && (
+        <AmenityTemplateDetailDialog
+          templateId={detailId}
+          templateName={(templatesQ.data ?? []).find((tpl) => tpl.id === detailId)?.name ?? ""}
+          isCurrent={detailId === currentTemplateId}
+          applying={apply.isPending}
+          onApply={() => apply.mutate(detailId)}
+          onClose={() => setDetailId(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+/** Full item list of one amenity template, with the apply action. */
+function AmenityTemplateDetailDialog({
+  templateId,
+  templateName,
+  isCurrent,
+  applying,
+  onApply,
+  onClose,
+}: {
+  templateId: string;
+  templateName: string;
+  isCurrent: boolean;
+  applying: boolean;
+  onApply: () => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+
+  const itemsQ = useQuery({
+    queryKey: ["amenity-template-items", templateId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("amenity_template_items")
+        .select("id, name, expected_qty, notes, sort_order")
+        .eq("template_id", templateId)
+        .order("sort_order");
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{templateName}</DialogTitle>
+        </DialogHeader>
+        {itemsQ.isLoading ? (
+          <ListSkeleton rows={3} />
+        ) : (itemsQ.data ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("prop.amenitiesEmptyTemplate")}</p>
+        ) : (
+          <ul className="space-y-2">
+            {(itemsQ.data ?? []).map((item) => (
+              <li
+                key={item.id}
+                className="flex items-start gap-2 rounded-md border border-border p-3 text-sm"
+              >
+                <span className="min-w-0 flex-1">
+                  {item.name}
+                  {item.notes && (
+                    <span className="block text-xs text-muted-foreground">{item.notes}</span>
+                  )}
+                </span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  x{item.expected_qty}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose}>
+            {t("common.cancel")}
+          </Button>
+          <Button onClick={onApply} disabled={applying}>
+            {isCurrent ? t("prop.amenitiesReapply") : t("prop.amenitiesApply")}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

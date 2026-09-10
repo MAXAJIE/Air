@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   AlertTriangle,
+  CheckCircle2,
   Clock,
   Sparkle,
   Star,
@@ -20,6 +21,7 @@ import {
 import { useActiveGroup, useProfile } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
+import { formatDuration } from "@/lib/duration";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/performance")({
@@ -120,14 +122,14 @@ function CleanerPerformance({ cleanerUserId }: { cleanerUserId: string | null })
           .eq("cleaner_user_id", cleanerUserId!)
           .order("created_at", { ascending: false })
           .limit(20),
+        // Every recent job, not just the timed ones: the approval rate needs
+        // the submitted/reviewed counts as well as the durations.
         supabase
           .from("cleaning_jobs")
-          .select("id, started_at, completed_at")
+          .select("id, status, started_at, completed_at")
           .eq("assigned_to_user_id", cleanerUserId!)
-          .not("started_at", "is", null)
-          .not("completed_at", "is", null)
-          .order("completed_at", { ascending: false })
-          .limit(20),
+          .order("created_at", { ascending: false })
+          .limit(50),
         supabase
           .from("amenity_checks")
           .select("id, actual_qty, checked_at, amenity_definition_id")
@@ -186,23 +188,31 @@ function CleanerPerformance({ cleanerUserId }: { cleanerUserId: string | null })
       ? (ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length).toFixed(1)
       : "—";
 
+  // Speed = accept -> submit. Only jobs with both stamps can be measured.
+  const timedJobs = jobs.filter((j) => j.started_at && j.completed_at);
   const avgTime =
-    jobs.length > 0
-      ? (() => {
-          const total = jobs.reduce((sum, j) => {
-            const d = new Date(j.completed_at!).getTime() - new Date(j.started_at!).getTime();
-            return sum + d;
-          }, 0);
-          const avg = total / jobs.length;
-          const mins = Math.round(avg / 60000);
-          return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
-        })()
+    timedJobs.length > 0
+      ? formatDuration(
+          timedJobs.reduce(
+            (sum, j) =>
+              sum + (new Date(j.completed_at!).getTime() - new Date(j.started_at!).getTime()),
+            0,
+          ) / timedJobs.length,
+        )
       : "—";
+
+  // Quality = share of finished work the owner approved.
+  const reviewedCount = jobs.filter((j) => j.status === "reviewed").length;
+  const finishedCount = jobs.filter(
+    (j) => j.status === "reviewed" || j.status === "submitted",
+  ).length;
+  const approvalRate =
+    finishedCount > 0 ? `${Math.round((reviewedCount / finishedCount) * 100)}%` : "—";
 
   return (
     <div className="space-y-6">
       {/* Summary cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="surface flex items-start gap-3 p-4">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
             <Star className="h-5 w-5" aria-hidden="true" />
@@ -227,7 +237,21 @@ function CleanerPerformance({ cleanerUserId }: { cleanerUserId: string | null })
             </p>
             <p className="font-display text-2xl font-semibold">{avgTime}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {jobs.length} {t("perf.jobs").toLowerCase()}
+              {timedJobs.length} {t("perf.jobs").toLowerCase()}
+            </p>
+          </div>
+        </div>
+        <div className="surface flex items-start gap-3 p-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+            <CheckCircle2 className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-xs uppercase tracking-wide text-muted-foreground">
+              {t("perf.approvalRate")}
+            </p>
+            <p className="font-display text-2xl font-semibold">{approvalRate}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {reviewedCount}/{finishedCount} {t("perf.jobs").toLowerCase()}
             </p>
           </div>
         </div>

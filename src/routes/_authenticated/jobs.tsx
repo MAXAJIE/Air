@@ -1,7 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { CheckCircle2, ChevronLeft, ChevronRight, Lightbulb, List, ListChecks, PartyPopper, Play, Send, Timer, Wand2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Lightbulb,
+  List,
+  ListChecks,
+  PartyPopper,
+  Play,
+  Send,
+  Timer,
+  Wand2,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { EmptyState, ListSkeleton, PageHeader } from "@/components/app-shell";
@@ -9,9 +22,17 @@ import { PhotoPicker } from "@/components/photo-picker";
 import { SignedPhoto } from "@/components/signed-photo";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAuthUser } from "@/hooks/use-app";
 import { useT } from "@/i18n";
 import { supabase } from "@/integrations/supabase/client";
+import { formatDuration, tickInterval } from "@/lib/duration";
 import {
   holdIdleLogout,
   isIdleLogoutHeld,
@@ -22,9 +43,9 @@ import { jobStatusChipClass } from "@/lib/status-colors";
 export const Route = createFileRoute("/_authenticated/jobs")({
   head: () => ({
     meta: [
-      { title: "Jobs — Keyward" },
+      { title: "My jobs — Keyward" },
       { name: "description", content: "Your assigned jobs and tasks." },
-      { property: "og:title", content: "Jobs — Keyward" },
+      { property: "og:title", content: "My jobs — Keyward" },
       { property: "og:description", content: "Your assigned jobs and tasks." },
       { name: "robots", content: "noindex" },
     ],
@@ -53,15 +74,25 @@ type JobItem = {
   requires_photo: boolean;
 };
 
+type SortKey = "due" | "status" | "name";
+
+/** Order used by the "status" sort: work to do first, finished work last. */
+const STATUS_WEIGHT: Record<Task["status"], number> = {
+  in_progress: 0,
+  pending: 1,
+  submitted: 2,
+  done: 3,
+};
+
 /**
- * Fetch a job's checklist items. Shared between the checklist UI and the
- * submit-gate so both surfaces read the same cached data (React Query
- * de-dupes by queryKey — no double network hit).
+ * Fetch a job's checklist items. Shared between the checklist UI, the
+ * accept-card preview and the submit gate, so every surface reads the same
+ * cached data (React Query de-dupes by queryKey — no double network hit).
  */
-function useJobItems(jobId: string | null) {
+function useJobItems(jobId: string | null, enabled = true) {
   return useQuery({
     queryKey: ["job-items", jobId],
-    enabled: !!jobId,
+    enabled: !!jobId && enabled,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("cleaning_job_items")
@@ -74,26 +105,77 @@ function useJobItems(jobId: string | null) {
   });
 }
 
-function useCountdown(dueAt: string | null) {
-  const [now, setNow] = useState(Date.now());
+/**
+ * Live countdown to a deadline, in human units ("2d 4h", "35m", "45s").
+ * `running` is false once the job is submitted or approved — finished work
+ * must not keep ticking.
+ */
+function useCountdown(dueAt: string | null, running: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+
+  const ms = dueAt ? new Date(dueAt).getTime() - now : 0;
+  const interval = tickInterval(ms);
+
   useEffect(() => {
-    if (!dueAt) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    if (!dueAt || !running) return;
+    const id = window.setInterval(() => setNow(Date.now()), interval);
     return () => window.clearInterval(id);
-  }, [dueAt]);
+    // Re-arming on the interval bucket (not on `ms`) keeps the timer stable.
+  }, [dueAt, running, interval]);
+
   if (!dueAt) return null;
-  const ms = new Date(dueAt).getTime() - now;
-  const overdue = ms < 0;
-  const abs = Math.abs(ms);
-  const mins = Math.floor(abs / 60000);
-  const secs = Math.floor((abs % 60000) / 1000);
-  return { overdue, label: `${mins}:${secs.toString().padStart(2, "0")}` };
+  return { overdue: ms < 0, label: formatDuration(ms), running };
+}
+
+function DueLine({ task }: { task: Task }) {
+  const t = useT();
+  const running = task.status === "pending" || task.status === "in_progress";
+  const countdown = useCountdown(task.due_at, running);
+  if (!task.due_at) return null;
+
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+      <span>
+        {t("task.due")} {new Date(task.due_at).toLocaleString()}
+      </span>
+      {countdown && (
+        <span
+          className={`inline-flex items-center gap-1 ${
+            countdown.running && countdown.overdue ? "font-medium text-destructive" : ""
+          }`}
+        >
+          <Timer className="h-3.5 w-3.5" aria-hidden="true" />
+          {!countdown.running
+            ? t("task.timerStopped")
+            : countdown.overdue
+              ? `${t("task.overdueBy")} ${countdown.label}`
+              : `${countdown.label} ${t("task.left")}`}
+        </span>
+      )}
+    </p>
+  );
+}
+
+function StatusChip({ status }: { status: Task["status"] }) {
+  const t = useT();
+  return (
+    <span className={jobStatusChipClass(status)}>
+      {status === "in_progress"
+        ? t("task.inProgress")
+        : status === "submitted"
+          ? t("task.submitted")
+          : status === "done"
+            ? t("task.done")
+            : t("task.pending")}
+    </span>
+  );
 }
 
 function JobsPage() {
   const t = useT();
   const { data: user } = useAuthUser();
   const qc = useQueryClient();
+  const [sort, setSort] = useState<SortKey>("due");
 
   const tasksQ = useQuery({
     queryKey: ["my-jobs", user?.id],
@@ -122,7 +204,7 @@ function JobsPage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      // Hold the 15-min idle logout while the user is actively working on a task.
+      // Hold the idle logout while the user is actively working on a task.
       holdIdleLogout();
       qc.invalidateQueries({ queryKey: ["my-jobs", user?.id] });
     },
@@ -138,7 +220,7 @@ function JobsPage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      // Release the hold: the 15-minute inactivity clock resumes.
+      // Release the hold: the inactivity clock resumes.
       releaseIdleLogout();
       qc.invalidateQueries({ queryKey: ["my-jobs", user?.id] });
       toast.success(t("common.saved"));
@@ -152,17 +234,46 @@ function JobsPage() {
     if (anyInProgress && !isIdleLogoutHeld()) holdIdleLogout();
   }, [tasksQ.data]);
 
-  const rows = tasksQ.data ?? [];
+  const rows = useMemo(() => {
+    const list = [...(tasksQ.data ?? [])];
+    const byDue = (a: Task, b: Task) => {
+      if (!a.due_at && !b.due_at) return 0;
+      if (!a.due_at) return 1;
+      if (!b.due_at) return -1;
+      return a.due_at.localeCompare(b.due_at);
+    };
+    if (sort === "name") list.sort((a, b) => a.title.localeCompare(b.title) || byDue(a, b));
+    else if (sort === "status")
+      list.sort((a, b) => STATUS_WEIGHT[a.status] - STATUS_WEIGHT[b.status] || byDue(a, b));
+    else list.sort(byDue);
+    return list;
+  }, [tasksQ.data, sort]);
 
   return (
     <>
       <PageHeader title={t("nav.jobs")} />
+
+      {rows.length > 0 && (
+        <div className="mb-3 flex justify-end">
+          <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+            <SelectTrigger className="h-8 w-[180px] text-xs" aria-label={t("task.sortBy")}>
+              <SelectValue placeholder={t("task.sortBy")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="due">{t("task.sortDue")}</SelectItem>
+              <SelectItem value="status">{t("task.sortStatus")}</SelectItem>
+              <SelectItem value="name">{t("task.sortName")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {tasksQ.isLoading ? (
         <ListSkeleton rows={4} />
       ) : rows.length === 0 ? (
         <EmptyState />
       ) : (
-        <section className="grid gap-3">
+        <section className="grid gap-2">
           {rows.map((task, index) => (
             <TaskCard
               key={task.id}
@@ -189,118 +300,154 @@ function TaskCard({
   onAccept: () => void;
   onSubmit: () => void;
 }) {
-  const t = useT();
-  const countdown = useCountdown(task.due_at);
-  const [proof, setProof] = useState<string | null>(task.proof_photo_path);
-  const [saveProof, setSaveProof] = useState(false);
+  const style = { animationDelay: `${index * 40}ms` };
+  if (task.status === "pending") return <OfferCard task={task} style={style} onAccept={onAccept} />;
+  if (task.status === "in_progress")
+    return <ActiveCard task={task} style={style} onSubmit={onSubmit} />;
+  return <FinishedCard task={task} style={style} />;
+}
 
-  // Block submission while any checklist item that requires a photo is
-  // still missing one. The gate applies only during the cleaner's active
-  // pass (status === "in_progress"), matching when photos can be uploaded.
+/**
+ * Not accepted yet: a small widget with the job name, how many steps it has
+ * and the step names only. The full brief (tips, photo pickers) appears once
+ * the cleaner accepts.
+ */
+function OfferCard({
+  task,
+  style,
+  onAccept,
+}: {
+  task: Task;
+  style: React.CSSProperties;
+  onAccept: () => void;
+}) {
+  const t = useT();
+  const itemsQ = useJobItems(task.cleaning_job_id);
+  const items = itemsQ.data ?? [];
+
+  return (
+    <article
+      className="surface animate-card-enter space-y-2 p-3 transition-shadow hover:shadow-[var(--shadow-lift)]"
+      style={style}
+    >
+      <header className="flex flex-wrap items-center gap-2">
+        <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{task.title}</h3>
+        <StatusChip status={task.status} />
+      </header>
+      <DueLine task={task} />
+
+      {items.length > 0 && (
+        <div className="rounded-md bg-muted/50 p-2">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
+            {t("task.stepCount").replace("{n}", String(items.length))}
+          </p>
+          <ol className="mt-1 space-y-0.5 text-xs">
+            {items.map((item, i) => (
+              <li key={item.id} className="truncate">
+                {i + 1}. {item.description}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      <footer className="flex justify-end">
+        <Button size="sm" onClick={onAccept}>
+          <Play className="h-4 w-4" aria-hidden="true" />
+          {t("task.accept")}
+        </Button>
+      </footer>
+    </article>
+  );
+}
+
+/** Accepted and being worked on: the full brief. */
+function ActiveCard({
+  task,
+  style,
+  onSubmit,
+}: {
+  task: Task;
+  style: React.CSSProperties;
+  onSubmit: () => void;
+}) {
+  const t = useT();
   const itemsQ = useJobItems(task.cleaning_job_id);
   const missingRequiredPhotos = (itemsQ.data ?? []).filter(
     (i) => i.requires_photo && !i.photo_url,
   );
-  const submitBlocked =
-    task.status === "in_progress" && missingRequiredPhotos.length > 0;
-
-  const savePhoto = async (path: string | null) => {
-    setProof(path);
-    setSaveProof(true);
-    const { error } = await supabase
-      .from("tasks")
-      .update({ proof_photo_path: path })
-      .eq("id", task.id);
-    setSaveProof(false);
-    if (error) toast.error(error.message);
-  };
+  const submitBlocked = missingRequiredPhotos.length > 0;
 
   return (
-    <article className="surface space-y-2 animate-card-enter p-3 transition-shadow hover:shadow-[var(--shadow-lift)] sm:space-y-3 sm:p-4" style={{ animationDelay: `${index * 40}ms` }}>
+    <article
+      className="surface animate-card-enter space-y-2 p-3 transition-shadow hover:shadow-[var(--shadow-lift)] sm:p-4"
+      style={style}
+    >
       <header className="flex flex-wrap items-center gap-2">
-        <h3 className="min-w-0 flex-1 truncate text-base font-medium">{task.title}</h3>
-        <span className={jobStatusChipClass(task.status)}>
-          {task.status === "in_progress"
-            ? t("task.inProgress")
-            : task.status === "submitted"
-              ? t("task.submitted")
-              : t("task.pending")}
-        </span>
-        {countdown && (
-          <span
-            className={`inline-flex items-center gap-1 text-xs ${
-              countdown.overdue ? "font-medium text-destructive" : "text-muted-foreground"
-            }`}
-          >
-            <Timer className="h-3.5 w-3.5" aria-hidden="true" />
-            {countdown.overdue ? `-${countdown.label}` : countdown.label}
+        <h3 className="min-w-0 flex-1 truncate text-sm font-medium sm:text-base">{task.title}</h3>
+        <StatusChip status={task.status} />
+      </header>
+      <DueLine task={task} />
+      {task.description && (
+        <p className="text-xs text-muted-foreground sm:text-sm">{task.description}</p>
+      )}
+
+      {task.cleaning_job_id && <ChecklistPanel jobId={task.cleaning_job_id} readOnly={false} />}
+
+      <footer className="flex flex-wrap items-center justify-end gap-2">
+        {submitBlocked && (
+          <span className="w-full text-right text-xs text-amber-600 dark:text-amber-400">
+            {t("task.photoBlocking").replace("{n}", String(missingRequiredPhotos.length))}
           </span>
         )}
-      </header>
-      {task.description && (
-        <p className="text-sm text-muted-foreground">{task.description}</p>
-      )}
+        <Button
+          size="sm"
+          disabled={submitBlocked}
+          onClick={onSubmit}
+          title={submitBlocked ? t("task.photoBlockingShort") : undefined}
+        >
+          <Send className="h-4 w-4" aria-hidden="true" />
+          {t("task.submit")}
+        </Button>
+      </footer>
+    </article>
+  );
+}
 
-      {task.cleaning_job_id && (
-        <ChecklistPanel jobId={task.cleaning_job_id} readOnly={task.status !== "in_progress"} />
-      )}
+/**
+ * Submitted or approved: collapsed to a one-line widget (name + status).
+ * The countdown is stopped and the checklist sits behind a toggle, so a day
+ * of finished work does not fill the screen.
+ */
+function FinishedCard({ task, style }: { task: Task; style: React.CSSProperties }) {
+  const [open, setOpen] = useState(false);
 
-      {task.status !== "pending" && (
-        <div className="space-y-2">
-          <p className="flex items-center gap-2 text-xs text-muted-foreground">
-            <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("task.proof")}
-          </p>
-          {task.status === "in_progress" ? (
-            <PhotoPicker
-              value={proof}
-              onChange={savePhoto}
-              folder="task-proof"
-              label={t("task.proof")}
-            />
-          ) : proof ? (
-            <SignedPhoto path={proof} alt={t("task.proof")} className="h-32 w-full rounded-md object-cover" />
-          ) : (
-            <p className="text-xs text-muted-foreground">{t("task.noProof")}</p>
-          )}
+  return (
+    <article className="surface animate-card-enter p-2.5" style={style}>
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 text-left"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <CheckCircle2
+          className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+          aria-hidden="true"
+        />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{task.title}</span>
+        <StatusChip status={task.status} />
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          aria-hidden="true"
+        />
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2 border-t border-border pt-2">
+          <DueLine task={task} />
+          {task.cleaning_job_id && <ChecklistPanel jobId={task.cleaning_job_id} readOnly />}
         </div>
       )}
-
-      <footer className="flex flex-wrap justify-end gap-2">
-        {task.status === "pending" && (
-          <Button size="sm" onClick={onAccept}>
-            <Play className="h-4 w-4" aria-hidden="true" />
-            {t("task.accept")}
-          </Button>
-        )}
-        {task.status === "in_progress" && (
-          <>
-            {submitBlocked && (
-              <span className="w-full text-right text-xs text-amber-600 dark:text-amber-400">
-                {t("task.photoBlocking").replace(
-                  "{n}",
-                  String(missingRequiredPhotos.length),
-                )}
-              </span>
-            )}
-            <Button
-              size="sm"
-              disabled={saveProof || submitBlocked}
-              onClick={onSubmit}
-              title={submitBlocked ? t("task.photoBlockingShort") : undefined}
-            >
-              <Send className="h-4 w-4" aria-hidden="true" />
-              {t("task.submit")}
-            </Button>
-          </>
-        )}
-        {task.status === "submitted" && (
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("task.submitted")}
-          </span>
-        )}
-      </footer>
     </article>
   );
 }

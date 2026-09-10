@@ -46,6 +46,7 @@ import {
   getGuestActivity,
   getGuestContext,
   rateCleaner,
+  saveGuestAmenityCheck,
   saveGuestCheckIn,
   startGuestSession,
   submitRoomCondition,
@@ -116,7 +117,7 @@ type GuestProperty = {
   photo_path: string | null;
 };
 
-type ViewState = "loading" | "welcome" | "history" | "menu" | "condition" | "request" | "shop" | "rate" | "thanksCondition" | "thanksRequest" | "thanksShop" | "thanksRate" | "expired" | "error";
+type ViewState = "loading" | "welcome" | "arrivalCheck" | "history" | "menu" | "condition" | "request" | "shop" | "rate" | "thanksCondition" | "thanksRequest" | "thanksShop" | "thanksRate" | "expired" | "error";
 
 type SessionState = {
   sessionId: string;
@@ -540,12 +541,23 @@ function GuestByCodePage() {
           propertyId={property.id}
           sessionId={session.sessionId}
           propertyName={property.name}
-          onDone={() => {
+          onDone={(completed) => {
             if (typeof window !== "undefined") {
               window.localStorage.setItem(checkInKey(session.sessionId), "1");
             }
-            setView("menu");
+            // Straight after the personal details we ask the guest to confirm
+            // the amenities in the room. Skipping the details skips this too.
+            setView(completed && (context?.amenities.length ?? 0) > 0 ? "arrivalCheck" : "menu");
           }}
+        />
+      )}
+
+      {view === "arrivalCheck" && session && property && (
+        <ArrivalAmenityChecklist
+          propertyId={property.id}
+          sessionId={session.sessionId}
+          amenities={context?.amenities ?? []}
+          onDone={() => setView("menu")}
         />
       )}
 
@@ -642,7 +654,7 @@ function WelcomeChecklist({
   propertyId: string;
   sessionId: string;
   propertyName: string;
-  onDone: () => void;
+  onDone: (completed: boolean) => void;
 }) {
   const t = useT();
   const [step, setStep] = useState(0);
@@ -702,7 +714,7 @@ function WelcomeChecklist({
       }),
     onSuccess: () => {
       toast.success(t("guest.checkin.saved"));
-      onDone();
+      onDone(true);
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
   });
@@ -814,7 +826,9 @@ function WelcomeChecklist({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={onDone}>{t("guest.checkin.closeConfirm")}</AlertDialogAction>
+            <AlertDialogAction onClick={() => onDone(false)}>
+              {t("guest.checkin.closeConfirm")}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1421,6 +1435,133 @@ function RateCleanerView({
       >
         {submit.isPending ? t("common.loading") : t("common.submit")}
       </Button>
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Arrival amenities checklist — shown right after the guest details   */
+/* ------------------------------------------------------------------ */
+/**
+ * "Did you get everything?" — the guest confirms each amenity the owner
+ * promised. Answers are saved as customer amenity checks, so the owner sees
+ * them (and gets the usual shortfall alert) without any extra step.
+ */
+function ArrivalAmenityChecklist({
+  propertyId,
+  sessionId,
+  amenities,
+  onDone,
+}: {
+  propertyId: string;
+  sessionId: string;
+  amenities: AmenityItem[];
+  onDone: () => void;
+}) {
+  const t = useT();
+  // undefined = not answered yet, true = enough, false = missing/short.
+  const [answers, setAnswers] = useState<Record<string, boolean | undefined>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+
+  const answered = amenities.filter((item) => answers[item.id] !== undefined).length;
+  const allAnswered = answered === amenities.length;
+
+  const save = useMutation({
+    mutationFn: async () =>
+      saveGuestAmenityCheck({
+        data: {
+          propertyId,
+          sessionId,
+          entries: amenities.map((item) => ({
+            amenityId: item.id,
+            // "Enough" records the expected quantity; a shortfall records 0 and
+            // the trigger on amenity_checks flags the discrepancy.
+            actualQty: answers[item.id] === false ? 0 : item.expected_qty,
+            note: notes[item.id]?.trim() || undefined,
+          })),
+        },
+      }),
+    onSuccess: () => {
+      toast.success(t("guest.amenityCheck.saved"));
+      onDone();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t("common.error")),
+  });
+
+  return (
+    <div className="space-y-5">
+      <header>
+        <h2 className="text-xl font-semibold">{t("guest.amenityCheck.title")}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{t("guest.amenityCheck.intro")}</p>
+      </header>
+
+      <ul className="space-y-2">
+        {amenities.map((item) => {
+          const answer = answers[item.id];
+          return (
+            <li key={item.id} className="rounded-lg border border-border p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1 text-sm font-medium">
+                  {item.name}
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    x{item.expected_qty}
+                  </span>
+                </span>
+                <div className="flex gap-1">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={answer === true ? "default" : "outline"}
+                    onClick={() => setAnswers((prev) => ({ ...prev, [item.id]: true }))}
+                  >
+                    {t("guest.amenityCheck.enough")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={answer === false ? "destructive" : "outline"}
+                    onClick={() => setAnswers((prev) => ({ ...prev, [item.id]: false }))}
+                  >
+                    {t("guest.amenityCheck.missing")}
+                  </Button>
+                </div>
+              </div>
+              {answer === false && (
+                <Input
+                  className="mt-2"
+                  placeholder={t("guest.amenityCheck.notePlaceholder")}
+                  value={notes[item.id] ?? ""}
+                  onChange={(e) =>
+                    setNotes((prev) => ({ ...prev, [item.id]: e.target.value }))
+                  }
+                />
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" className="flex-1" onClick={onDone}>
+          {t("guest.amenityCheck.later")}
+        </Button>
+        <Button
+          type="button"
+          className="flex-1"
+          disabled={!allAnswered || save.isPending}
+          onClick={() => save.mutate()}
+        >
+          {save.isPending ? t("common.loading") : t("common.submit")}
+        </Button>
+      </div>
+      {!allAnswered && (
+        <p className="text-center text-xs text-muted-foreground">
+          {t("guest.amenityCheck.progress")
+            .replace("{done}", String(answered))
+            .replace("{total}", String(amenities.length))}
+        </p>
+      )}
     </div>
   );
 }

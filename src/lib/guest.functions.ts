@@ -356,6 +356,56 @@ export const submitRoomCondition = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+/**
+ * Arrival amenities checklist.
+ *
+ * Right after check-in the guest confirms, item by item, that the promised
+ * amenities are actually in the room. Each answer is stored as an
+ * `amenity_checks` row with role "customer", which is the same table the owner
+ * and the cleaner write to — so the owner sees the guest's answers (and any
+ * shortfall notification) without a separate sync step.
+ */
+export const saveGuestAmenityCheck = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z
+      .object({
+        propertyId: uuid,
+        sessionId: uuid,
+        entries: z
+          .array(
+            z.object({
+              amenityId: uuid,
+              actualQty: z.number().int().min(0).max(9999),
+              note: z.string().max(500).optional(),
+            }),
+          )
+          .min(1)
+          .max(60),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    await requireSession(data.sessionId, data.propertyId);
+    const db = await admin();
+
+    const { error } = await db.from("amenity_checks").insert(
+      data.entries.map((entry) => ({
+        amenity_definition_id: entry.amenityId,
+        property_id: data.propertyId,
+        role: "customer" as const,
+        customer_session_id: data.sessionId,
+        actual_qty: entry.actualQty,
+        // Trimmed to null so an empty box does not store an empty string.
+        notes: entry.note?.trim() ? entry.note.trim() : null,
+      })),
+    );
+    if (error) throw new Error(error.message);
+
+    // The is_discrepancy flag and the owner notification are handled by the
+    // existing database triggers on amenity_checks.
+    return { ok: true, saved: data.entries.length };
+  });
+
 /** Guests rate the cleaner — never the owner. */
 export const rateCleaner = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
